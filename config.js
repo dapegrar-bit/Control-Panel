@@ -1,4 +1,5 @@
-// الإعدادات العامة فقط. لا تضعي مفاتيح الخدمة السرية هنا.
-export const SUPABASE_URL='REPLACE_SUPABASE_URL';
-export const SUPABASE_ANON_KEY='REPLACE_PUBLIC_ANON_KEY';
-export const API_BASE='REPLACE_HTTPS_API_URL';
+// Public configuration only. Never place database passwords or service-role keys here.
+export const SUPABASE_URL = 'https://frvvhfdhavprgredelcl.supabase.co';
+// Paste the project's public anon (or publishable) key below before publishing.
+export const SUPABASE_ANON_KEY = 'PASTE_PUBLIC_SUPABASE_KEY_HERE';
+export const API_BASE = 'https://control-panel-40y1.onrender.com';
