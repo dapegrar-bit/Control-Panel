@@ -10,7 +10,10 @@ const app=express();
 const db=new pg.Pool({connectionString:process.env.DATABASE_URL,ssl:{rejectUnauthorized:true}});
 const auth=createClient(process.env.SUPABASE_URL,process.env.SUPABASE_ANON_KEY,{auth:{persistSession:false}});
 app.disable('x-powered-by');app.use(helmet());app.use(cors({origin:process.env.ALLOWED_ORIGIN||false}));app.use(express.json({limit:'16kb'}));app.use(rateLimit({windowMs:60000,limit:80,standardHeaders:'draft-7',legacyHeaders:false}));
-async function guard(req,res,next){try{const token=(req.headers.authorization||'').match(/^Bearer (.+)$/)?.[1];if(!token)return res.sendStatus(401);const {data,error}=await auth.auth.getUser(token);if(error||!data.user)return res.sendStatus(401);const role=await db.query('select role from app_roles where user_id=$1',[data.user.id]);if(!role.rows.length)return res.sendStatus(403);req.role=role.rows[0].role;next()}catch(e){next(e)}}
+async function guard(req,res,next){try{const token=(req.headers.authorization||'').match(/^Bearer (.+)$/)?.[1];if(!token)return res.sendStatus(401);const {data,error}=await auth.auth.getUser(token);if(error||!data.user)return res.sendStatus(401);const role=await db.query(
+  'SELECT role FROM app_private.user_roles WHERE user_id=$1',
+  [data.user.id]
+);if(!role.rows.length)return res.sendStatus(403);req.role=role.rows[0].role;next()}catch(e){next(e)}}
 const adminAuth=process.env.SUPABASE_SERVICE_ROLE_KEY ? createClient(process.env.SUPABASE_URL,process.env.SUPABASE_SERVICE_ROLE_KEY,{auth:{persistSession:false}}) : null;
 app.post('/setup/first-admin',async(req,res,next)=>{try{
  const {setupKey,email,password}=req.body||{};
