@@ -1,1 +1,19 @@
-{"name":"secure-trainees","private":true,"version":"1.0.0","type":"module","scripts":{"start":"node server.js"},"dependencies":{"@supabase/supabase-js":"^2.49.0","cors":"^2.8.5","express":"^4.21.2","express-rate-limit":"^7.5.0","exceljs":"^4.4.0","helmet":"^8.0.0","pg":"^8.13.3"}}
+{
+  "name": "secure-trainees",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "exceljs": "^4.4.0",
+    "helmet": "^8.0.0",
+    "pg": "^8.13.3",
+    "multer": "^1.4.5-lts.1"
+  }
+}

@@ -5,6 +5,8 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import pg from 'pg';
 import ExcelJS from 'exceljs';
+import multer from 'multer';
+import { createHash } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 
 // ========================================
@@ -238,6 +240,7 @@ async function guard(req, res, next) {
 }
 
 app.use('/api', guard);
+app.get('/api/me', (req,res)=>res.json({role:req.role}));
 
 // ========================================
 // 8. جلب أسماء الأوراق وأعداد السجلات
@@ -476,11 +479,129 @@ app.post('/api/export', async (req, res, next) => {
   }
 });
 
+
+// ========================================
+// استيراد Excel للمدير فقط
+// ========================================
+const excelUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 35 * 1024 * 1024, files: 1 },
+  fileFilter(_req, file, callback) {
+    const ok = /\.xlsx$/i.test(file.originalname);
+    callback(ok ? null : new Error('يُسمح بملفات XLSX فقط'), ok);
+  }
+});
+
+function adminOnly(req, res, next) {
+  if (req.role !== 'admin') return res.sendStatus(403);
+  next();
+}
+
+function excelValue(cell) {
+  const value = cell.value;
+  if (value === null || value === undefined) return null;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === 'object') {
+    if (value.result !== undefined) return value.result;
+    if (value.text !== undefined) return value.text;
+    if (value.richText) return value.richText.map(x => x.text).join('');
+    if (value.hyperlink) return value.text || value.hyperlink;
+    return cell.text || null;
+  }
+  return value;
+}
+
+async function parseWorkbook(buffer, includeRecords) {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+  const sheets = [];
+  const records = [];
+  for (const sheet of workbook.worksheets) {
+    const header = sheet.getRow(1);
+    const lastColumn = header.cellCount;
+    if (!lastColumn) continue;
+    const headers = [];
+    const used = new Set();
+    for (let i = 1; i <= lastColumn; i++) {
+      const base = String(excelValue(header.getCell(i)) ?? `عمود ${i}`).trim() || `عمود ${i}`;
+      let name = base, suffix = 2;
+      while (used.has(name)) name = `${base} (${suffix++})`;
+      used.add(name);
+      headers.push(name);
+    }
+    let count = 0;
+    sheet.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return;
+      const payload = {};
+      let nonempty = false;
+      for (let i = 1; i <= lastColumn; i++) {
+        const value = excelValue(row.getCell(i));
+        payload[headers[i - 1]] = value;
+        if (value !== null && value !== '') nonempty = true;
+      }
+      if (!nonempty) return;
+      count++;
+      if (includeRecords) records.push({ sheet: sheet.name, payload });
+    });
+    sheets.push({ name: sheet.name, count, columns: headers.length });
+  }
+  if (!sheets.length) throw new Error('لم يُعثر على أوراق تحتوي على عناوين أعمدة');
+  if (sheets.reduce((sum, s) => sum + s.count, 0) > 80000) {
+    throw new Error('الحد الأقصى 80000 سجل في الملف الواحد');
+  }
+  return { sheets, records };
+}
+
+app.post('/api/import/preview', adminOnly, excelUpload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'اختاري ملف Excel' });
+    const parsed = await parseWorkbook(req.file.buffer, false);
+    res.json({ sheets: parsed.sheets, total: parsed.sheets.reduce((n, s) => n + s.count, 0) });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/import/upload', adminOnly, excelUpload.single('file'), async (req, res, next) => {
+  let client;
+  try {
+    if (!req.file) return res.status(400).json({ error: 'اختاري ملف Excel' });
+    const hash = createHash('sha256').update(req.file.buffer).digest('hex');
+    const parsed = await parseWorkbook(req.file.buffer, true);
+    client = await db.connect();
+    await client.query('BEGIN');
+    // يمنع تزامن عمليتي رفع داخل النظام نفسه.
+    await client.query('SELECT pg_advisory_xact_lock(84621831)');
+    const existing = await client.query('SELECT 1 FROM public.trainee_imports WHERE file_hash=$1', [hash]);
+    if (existing.rowCount) {
+      await client.query('ROLLBACK');
+      client.release(); client = null;
+      return res.status(409).json({ error: 'تم استيراد هذا الملف سابقًا، ولن نكرر بياناته' });
+    }
+    for (let offset = 0; offset < parsed.records.length; offset += 150) {
+      const batch = parsed.records.slice(offset, offset + 150);
+      const args = [];
+      const placeholders = batch.map((record, i) => {
+        args.push(record.sheet, JSON.stringify(record.payload));
+        return `($${2*i+1},$${2*i+2}::jsonb)`;
+      });
+      await client.query(`INSERT INTO public.trainee_records (sheet_name,payload) VALUES ${placeholders.join(',')}`, args);
+    }
+    await client.query('INSERT INTO public.trainee_imports(file_hash,file_name,row_count) VALUES ($1,$2,$3)', [hash, req.file.originalname, parsed.records.length]);
+    await client.query('COMMIT');
+    client.release(); client = null;
+    res.json({ imported: parsed.records.length, sheets: parsed.sheets });
+  } catch (error) {
+    if (client) { try { await client.query('ROLLBACK'); } catch {} client.release(); }
+    next(error);
+  }
+});
+
 // ========================================
 // 12. معالجة الأخطاء
 // ========================================
 
 app.use((error, req, res, _next) => {
+  if (error instanceof multer.MulterError) return res.status(400).json({ error: 'حجم الملف كبير أو نوع الرفع غير صالح (الحد 35MB)' });
+  if (error.message?.includes('XLSX') || error.message?.includes('80000') || error.message?.includes('عناوين أعمدة')) return res.status(400).json({ error: error.message });
   console.error('Server error:', {
     code: error.code || 'UNKNOWN',
     message: error.message,
