@@ -9,10 +9,11 @@ const app=express();
 const db = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
-    rejectUnauthorized: true,
-    ca: process.env.SUPABASE_DB_CA_CERT?.replace(/\\n/g, '\n')
+    ca: process.env.DATABASE_CA_CERT?.replace(/\\n/g, '\n'),
+    rejectUnauthorized: true
   }
-});const auth=createClient(process.env.SUPABASE_URL,process.env.SUPABASE_ANON_KEY,{auth:{persistSession:false}});
+});
+const auth=createClient(process.env.SUPABASE_URL,process.env.SUPABASE_ANON_KEY,{auth:{persistSession:false}});
 app.disable('x-powered-by');app.get('/health',(_req,res)=>res.json({status:'ok'}));app.use(helmet());app.use(cors({origin:process.env.ALLOWED_ORIGIN||false}));app.use(express.json({limit:'16kb'}));app.use(rateLimit({windowMs:60000,limit:80,standardHeaders:'draft-7',legacyHeaders:false}));
 async function guard(req,res,next){try{const token=(req.headers.authorization||'').match(/^Bearer (.+)$/)?.[1];if(!token)return res.sendStatus(401);const {data,error}=await auth.auth.getUser(token);if(error||!data.user)return res.sendStatus(401);const role=await db.query(
   'SELECT role FROM app_private.user_roles WHERE user_id=$1',
