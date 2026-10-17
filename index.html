@@ -176,7 +176,7 @@ $('export').onclick=()=>bulkExport('selected');$('exportAll').onclick=()=>bulkEx
 async function printScope(scope){try{let printRows=[];if(scope==='selected'&&!selected.size)throw Error('حددي سجلات أولًا');const count=scope==='filtered'?total:selected.size;if(count>2000)throw Error('الطباعة محدودة بـ 2000 سجل؛ استخدمي تصدير الكل Excel للعدد الأكبر');const all=scope==='filtered'?null:new Set(selected);for(let p=1;p<=Math.ceil(total/pageSize);p++){const q=new URLSearchParams({page:p,sheet:$('sheet').value,search:$('search').value.trim()});const data=await json('/records?'+q);printRows.push(...data.records.filter(r=>!all||all.has(r.id)));if(printRows.length>=count)break;}const w=window.open('','_blank');if(!w)throw Error('اسمحي بالنوافذ المنبثقة للطباعة');const doc=w.document;doc.documentElement.lang='ar';doc.documentElement.dir='rtl';doc.title='طباعة بيانات المتدربين';const style=doc.createElement('style');style.textContent='body{font:12px Tahoma;direction:rtl}table{border-collapse:collapse;width:100%}td,th{border:1px solid #aaa;padding:5px;text-align:right}th{background:#e6f2ee}@page{size:landscape;margin:10mm}';doc.head.append(style);const table=doc.createElement('table'),head=doc.createElement('tr');COLS.forEach(k=>head.append(node('th',k)));table.append(head);for(const r of printRows){const tr=node('tr');COLS.forEach(k=>tr.append(node('td',r.payload?.[k]??'')));table.append(tr)}doc.body.append(table);w.focus();w.print()}catch(e){$('message').textContent=e.message}}
 $('print').onclick=()=>printScope('selected');$('printAll').onclick=()=>printScope('filtered');$('reportAll').onclick=()=>bulkExport('filtered');$('reportSelected').onclick=()=>bulkExport('selected');$('reportPrint').onclick=()=>printScope('filtered');
 
-// صفحة الشهادات والخطابات: القوالب قابلة للتعديل من document-templates.js.
+// صفحة الشهادات والخطابات: تظهر فقط القوالب المسجلة والمطابقة للدفعة.
 let docPerson=null;
 let docOverrides={},docDraft=null;
 const docEffective=t=>({...t,name:{...t.name,...(docOverrides[t.id]||{})}});
@@ -185,7 +185,7 @@ async function loadDocOverrides(){try{const r=await json('/documents/positions')
 
 const docNameKey='الاسم الثلاثي ( باللغة العربية )',docBatchKey='الدفعة';
 const docBatchNumbers={'الأولى':1,'الثانية':2,'الثالثة':3,'الرابعة':4,'الخامسة':5,'السادسة':6,'السابعة':7,'الثامنة':8,'التاسعة':9,'العاشرة':10,'الحادية عشرة':11,'الثانية عشرة':12,'الثالثة عشرة':13};
-function docBatchNumber(value){const t=String(value??'').trim().replace(/[٠-٩]/g,d=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/[۰-۹]/g,d=>String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)));const m=t.match(/\d+/);if(m)return Number(m[0]);for(const [word,n] of Object.entries(docBatchNumbers))if(t.includes(word))return n;return null}
+function docBatchNumber(value){const t=String(value??'').trim().replace(/[٠-٩]/g,d=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/[۰-۹]/g,d=>String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)));const m=t.match(/\d+/);if(m)return Number(m[0]);for(const [word,n] of Object.entries(docBatchNumbers).sort((a,b)=>b[0].length-a[0].length))if(t.includes(word))return n;return null}
 
 const safeHtml=t=>String(t??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const docAssetUrl=path=>new URL(path,location.href).href;
@@ -197,10 +197,10 @@ async function searchDocuments(){
  }catch(e){$('docSearchMsg').textContent=e.message}
 }
 async function selectDocPerson(rec){docPerson=rec;const name=String(rec.payload?.[docNameKey]||'');const batch=String(rec.payload?.[docBatchKey]||'').trim();$('docSelected').textContent=`${name} — الدفعة: ${batch} — الحالة: ${rec.payload?.['الحالة']||'—'}`;
- const matches=DOCUMENT_TEMPLATES.filter(t=>t.batch==='جميع الدفعات'||(docBatchNumber(batch)!==null&&docBatchNumber(t.batch)===docBatchNumber(batch)));
- // تظهر الخطابات أولًا دائمًا؛ عند غياب خطاب خاص بالدفعة يظهر الخطاب العام.
- const specificLetters=matches.filter(t=>t.kind==='letter'&&t.batch!=='جميع الدفعات');
- const letters=matches.filter(t=>t.kind==='letter'&&(t.batch!=='جميع الدفعات'||specificLetters.length===0));
+ // عرض القوالب الأصلية المطابقة لدفعة المتدرب فقط؛ لا خطابات عامة أو بديلة.
+ const batchId=docBatchNumber(batch);
+ const matches=DOCUMENT_TEMPLATES.filter(t=>batchId!==null&&t.batch!=='جميع الدفعات'&&docBatchNumber(t.batch)===batchId);
+ const letters=matches.filter(t=>t.kind==='letter');
  const certificates=matches.filter(t=>t.kind==='certificate');
  const ordered=[...letters,...certificates];
  $('docTemplate').replaceChildren(new Option(ordered.length?'اختاري الخطاب أو الشهادة':'لا توجد قوالب لهذه الدفعة',''),...ordered.map(t=>new Option((t.kind==='letter'?'✉️ ':'🎓 ')+t.label,t.id)));
