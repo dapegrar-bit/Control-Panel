@@ -646,8 +646,28 @@ const docFields = {
   batch:'الدفعة', status:'الحالة', name:'الاسم الثلاثي ( باللغة العربية )',
   email:'الايميل', phone:'رقم الجوال', nationalId:'رقم الهوية الوطنية'
 };
-const batchNumbers={'الأولى':1,'الثانية':2,'الثالثة':3,'الرابعة':4,'الخامسة':5,'السادسة':6,'السابعة':7,'الثامنة':8,'التاسعة':9,'العاشرة':10,'الحادية عشرة':11,'الثانية عشرة':12,'الثالثة عشرة':13};
-function batchNumber(value){const t=String(value??'').trim().replace(/[٠-٩]/g,d=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/[۰-۹]/g,d=>String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)));const m=t.match(/\d+/);if(m)return Number(m[0]);for(const [word,n] of Object.entries(batchNumbers))if(t.includes(word))return n;return null}
+// تقبل أسماء الدفعات كما تظهر في سجلات المتدربين والقوالب، بصيغتي التذكير والتأنيث.
+const batchNumbers = Object.freeze({
+  'الأولى': 1, 'الثانية': 2, 'الثالثة': 3, 'الرابعة': 4,
+  'الخامسة': 5, 'السادسة': 6, 'السابعة': 7, 'الثامنة': 8,
+  'التاسعة': 9, 'العاشرة': 10,
+  'الحادي عشر': 11, 'الحادية عشرة': 11,
+  'الثاني عشر': 12, 'الثانية عشر': 12, 'الثانية عشرة': 12,
+  'الثالث عشر': 13, 'الثالثة عشر': 13, 'الثالثة عشرة': 13
+});
+function batchNumber(value) {
+  const t = String(value ?? '').normalize('NFKC')
+    .replace(/[\u064B-\u065F\u0670]/g, '')
+    .replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+    .replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+    .replace(/\s+/g, ' ').trim();
+  const m = t.match(/(?:^|\b)(?:batch[-\s]*)?(\d+)(?:\b|$)/i);
+  if (m) return Number(m[1]);
+  for (const [word, number] of Object.entries(batchNumbers)) {
+    if (t === word || t === `الدفعة ${word}`) return number;
+  }
+  return null;
+}
 async function allDocumentTemplates(){
  const r=await db.query(`SELECT template_id AS id,batch_name AS batch,document_kind AS kind,document_type AS type,label,image_path AS image,orientation,name_settings AS name FROM public.trainee_document_templates WHERE enabled=true ORDER BY batch_name,document_kind,document_type`);
  return r.rows;
