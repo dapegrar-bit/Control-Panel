@@ -1,1 +1,10 @@
-Replace only index.html in GitHub Pages source with this file. Do not overwrite templates or server.js. Commit, then Fetch origin before Push origin in GitHub Desktop if remote has newer commits. This fixes Arabic batch numbering, search validation, and template reload on trainee selection. No SQL required.
+إصلاح ظهور قوالب الشهادات والخطابات
+
+1. في GitHub Desktop اضغطي Fetch origin ثم Pull origin إذا ظهر، لمعالجة وجود تغييرات جديدة على الخادم.
+2. انسخي index.html الموجود هنا إلى مجلد مشروع Control-Panel المحلي بدل النسخة القديمة.
+3. افتحي GitHub Desktop ثم Commit to main ثم Push origin.
+4. بعد النشر حدّثي الصفحة Ctrl+F5.
+
+التعديل: يستدعي القوالب من Render أولًا؛ وإذا أخفق الاستدعاء أو رجع فارغًا، يستخدم سجلًا محليًا من 24 قالبًا موجودًا بالفعل في ZIP المرفوع. يطابق أسماء الدفعات العربية المتنوعة، ويعرض الخطابات فقط للدفعات التي لديها خطاب. لا يغيّر ملفات الصور أو مواضع الأسماء أو طريقة PDF أو قاعدة البيانات.
+
+مهم: وضع الاحتياط لا يثبت صلاحية الصور على GitHub أو جاهزية API لإصدار المستند؛ إصدار المستند ما زال يتطلب اتصالًا ناجحًا بالخادم. يجب نشر مجلد templates كما هو في المستودع.

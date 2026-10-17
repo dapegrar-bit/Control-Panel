@@ -75,7 +75,19 @@ body[data-active-page="settings"] .site-footer{background:linear-gradient(100deg
 import {createClient} from 'https://esm.sh/@supabase/supabase-js@2';
 import {SUPABASE_URL,SUPABASE_ANON_KEY,API_BASE} from './config.js';
 let DOCUMENT_TEMPLATES=[];
-async function refreshDocumentTemplates(){const data=await json('/documents/templates');DOCUMENT_TEMPLATES=data.templates||[];}
+// القوالب الأصلية الموجودة فعليًا في مجلد templates؛ تُستخدم عند تعذر تحميل سجل الخادم فقط.
+const LOCAL_DOCUMENT_TEMPLATES = [{"id":"batch-13-excellence","batch":"الدفعة الثالثة عشرة","kind":"certificate","type":"excellence","label":"شهادة اجتياز بتميز — الدفعة الثالثة عشرة","image":"templates/batch-13/excellence.jpg","orientation":"landscape","name":{"x":50,"y":47,"size":32,"color":"#1F4E46","width":74}},{"id":"batch-13-attendance","batch":"الدفعة الثالثة عشرة","kind":"certificate","type":"attendance","label":"شهادة حضور — الدفعة الثالثة عشرة","image":"templates/batch-13/attendance.jpg","orientation":"landscape","name":{"x":50,"y":47,"size":32,"color":"#1F4E46","width":74}},{"id":"batch-13-pass","batch":"الدفعة الثالثة عشرة","kind":"certificate","type":"pass","label":"شهادة اجتياز — الدفعة الثالثة عشرة","image":"templates/batch-13/pass.jpg","orientation":"landscape","name":{"x":50,"y":47,"size":32,"color":"#1F4E46","width":74}},{"id":"batch-13-letter","batch":"الدفعة الثالثة عشرة","kind":"letter","type":"letter","label":"خطاب — الدفعة الثالثة عشرة","image":"templates/batch-13/letter.png","orientation":"landscape","name":{"x":50,"y":51,"size":32,"color":"#FFFFFF","width":74}},{"id":"batch-12-excellence","batch":"الدفعة الثانية عشرة","kind":"certificate","type":"excellence","label":"شهادة اجتياز بتميز — الدفعة الثانية عشرة","image":"templates/batch-12/excellence.jpg","orientation":"landscape","name":{"x":50,"y":47,"size":32,"color":"#1F4E46","width":74}},{"id":"batch-12-attendance","batch":"الدفعة الثانية عشرة","kind":"certificate","type":"attendance","label":"شهادة حضور — الدفعة الثانية عشرة","image":"templates/batch-12/attendance.jpg","orientation":"landscape","name":{"x":50,"y":47,"size":32,"color":"#1F4E46","width":74}},{"id":"batch-12-pass","batch":"الدفعة الثانية عشرة","kind":"certificate","type":"pass","label":"شهادة اجتياز — الدفعة الثانية عشرة","image":"templates/batch-12/pass.jpg","orientation":"landscape","name":{"x":50,"y":47,"size":32,"color":"#1F4E46","width":74}},{"id":"batch-7-excellence","batch":"الدفعة السابعة","kind":"certificate","type":"excellence","label":"شهادة اجتياز بتميز — الدفعة السابعة","image":"templates/batch-7/excellence.jpg","orientation":"landscape","name":{"x":50,"y":47,"size":32,"color":"#1F4E46","width":74}},{"id":"batch-7-attendance","batch":"الدفعة السابعة","kind":"certificate","type":"attendance","label":"شهادة حضور — الدفعة السابعة","image":"templates/batch-7/attendance.jpg","orientation":"landscape","name":{"x":50,"y":47,"size":32,"color":"#1F4E46","width":74}},{"id":"batch-7-pass","batch":"الدفعة السابعة","kind":"certificate","type":"pass","label":"شهادة اجتياز — الدفعة السابعة","image":"templates/batch-7/pass.jpg","orientation":"landscape","name":{"x":50,"y":47,"size":32,"color":"#1F4E46","width":74}},{"id":"batch-7-letter","batch":"الدفعة السابعة","kind":"letter","type":"letter","label":"خطاب — الدفعة السابعة","image":"templates/batch-7/letter.png","orientation":"landscape","name":{"x":50,"y":51,"size":32,"color":"#FFFFFF","width":74}},{"id":"batch-11-excellence","batch":"الدفعة الحادية عشرة","kind":"certificate","type":"excellence","label":"شهادة اجتياز بتميز — الدفعة الحادية عشرة","image":"templates/batch-11/excellence.png","orientation":"landscape","name":{"x":50,"y":47,"size":32,"color":"#1F4E46","width":74}},{"id":"batch-11-attendance","batch":"الدفعة الحادية عشرة","kind":"certificate","type":"attendance","label":"شهادة حضور — الدفعة الحادية عشرة","image":"templates/batch-11/attendance.png","orientation":"landscape","name":{"x":50,"y":47,"size":32,"color":"#1F4E46","width":74}},{"id":"batch-11-pass","batch":"الدفعة الحادية عشرة","kind":"certificate","type":"pass","label":"شهادة اجتياز — الدفعة الحادية عشرة","image":"templates/batch-11/pass.png","orientation":"landscape","name":{"x":50,"y":47,"size":32,"color":"#1F4E46","width":74}},{"id":"batch-5-excellence","batch":"الدفعة الخامسة","kind":"certificate","type":"excellence","label":"شهادة اجتياز بتميز — الدفعة الخامسة","image":"templates/batch-5/excellence.png","orientation":"landscape","name":{"x":50,"y":47,"size":32,"color":"#1F4E46","width":74}},{"id":"batch-5-pass","batch":"الدفعة الخامسة","kind":"certificate","type":"pass","label":"شهادة اجتياز — الدفعة الخامسة","image":"templates/batch-5/pass.png","orientation":"landscape","name":{"x":50,"y":47,"size":32,"color":"#1F4E46","width":74}},{"id":"batch-5-letter","batch":"الدفعة الخامسة","kind":"letter","type":"letter","label":"خطاب — الدفعة الخامسة","image":"templates/batch-5/letter.png","orientation":"landscape","name":{"x":50,"y":51,"size":32,"color":"#FFFFFF","width":74}},{"id":"batch-6-excellence","batch":"الدفعة السادسة","kind":"certificate","type":"excellence","label":"شهادة اجتياز بتميز — الدفعة السادسة","image":"templates/batch-6/excellence.png","orientation":"landscape","name":{"x":50,"y":47,"size":32,"color":"#1F4E46","width":74}},{"id":"batch-6-pass","batch":"الدفعة السادسة","kind":"certificate","type":"pass","label":"شهادة اجتياز — الدفعة السادسة","image":"templates/batch-6/pass.png","orientation":"landscape","name":{"x":50,"y":47,"size":32,"color":"#1F4E46","width":74}},{"id":"batch-6-letter","batch":"الدفعة السادسة","kind":"letter","type":"letter","label":"خطاب — الدفعة السادسة","image":"templates/batch-6/letter.png","orientation":"landscape","name":{"x":50,"y":51,"size":32,"color":"#FFFFFF","width":74}},{"id":"batch-10-excellence","batch":"الدفعة العاشرة","kind":"certificate","type":"excellence","label":"شهادة اجتياز بتميز — الدفعة العاشرة","image":"templates/batch-10/excellence.png","orientation":"landscape","name":{"x":50,"y":47,"size":32,"color":"#1F4E46","width":74}},{"id":"batch-10-pass","batch":"الدفعة العاشرة","kind":"certificate","type":"pass","label":"شهادة اجتياز — الدفعة العاشرة","image":"templates/batch-10/pass.png","orientation":"landscape","name":{"x":50,"y":47,"size":32,"color":"#1F4E46","width":74}},{"id":"batch-8-excellence","batch":"الدفعة الثامنة","kind":"certificate","type":"excellence","label":"شهادة اجتياز بتميز — الدفعة الثامنة","image":"templates/batch-8/excellence.png","orientation":"landscape","name":{"x":50,"y":47,"size":32,"color":"#1F4E46","width":74}},{"id":"batch-8-pass","batch":"الدفعة الثامنة","kind":"certificate","type":"pass","label":"شهادة اجتياز — الدفعة الثامنة","image":"templates/batch-8/pass.png","orientation":"landscape","name":{"x":50,"y":47,"size":32,"color":"#1F4E46","width":74}}];
+async function refreshDocumentTemplates(){
+ try {
+  const data=await json('/documents/templates');
+  if(!Array.isArray(data.templates)||!data.templates.length)throw new Error('قائمة القوالب فارغة');
+  DOCUMENT_TEMPLATES=data.templates;
+ } catch(error){
+  console.warn('تعذر تحميل سجل القوالب من الخادم، جارٍ استخدام القوالب الأصلية المحلية:',error);
+  DOCUMENT_TEMPLATES=LOCAL_DOCUMENT_TEMPLATES;
+ }
+ return DOCUMENT_TEMPLATES;
+}
 const sb=createClient(SUPABASE_URL,SUPABASE_ANON_KEY),$=id=>document.getElementById(id);
 function showPage(page){document.querySelectorAll('[data-pane]').forEach(el=>{el.hidden=el.dataset.pane!==page});document.querySelectorAll('[data-page]').forEach(el=>{el.classList.toggle('active',el.dataset.page===page);el.setAttribute('aria-current',el.dataset.page===page?'page':'false')});if(page==='imports'&&role!=='admin')showPage('records')}
 const pageDescriptions={dashboard:'لوحة التحليلات والمؤشرات',records:'سجلات المتدربين وإدارتها',imports:'استيراد ملفات Excel ومتابعة الحفظ',reports:'التقارير والتصدير والطباعة',settings:'إعدادات ومعلومات النظام',documents:'إصدار الشهادات والخطابات وسجلها'};
@@ -186,14 +198,18 @@ async function loadDocOverrides(){try{const r=await json('/documents/positions')
 const docNameKey='الاسم الثلاثي ( باللغة العربية )',docBatchKey='الدفعة';
 const docBatchNumbers={'الأولى':1,'الثانية':2,'الثالثة':3,'الرابعة':4,'الخامسة':5,'السادسة':6,'السابعة':7,'الثامنة':8,'التاسعة':9,'العاشرة':10,'الحادية عشرة':11,'الثانية عشرة':12,'الثالثة عشرة':13};
 function docBatchNumber(value){
- const t=String(value??'').normalize('NFKC').trim()
+ const text=String(value??'').normalize('NFKC').trim()
   .replace(/[٠-٩]/g,d=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
   .replace(/[۰-۹]/g,d=>String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
   .replace(/[\u064B-\u065F\u0670]/g,'')
-  .replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/ة/g,'ه').replace(/\s+/g,' ');
- const n=t.match(/\d+/);if(n)return Number(n[0]);
- const names=[['الحاديه عشره',11],['الثانيه عشره',12],['الثالثه عشره',13],['الحاديه عشر',11],['الثانيه عشر',12],['الثالثه عشر',13],['الاولي',1],['الثانيه',2],['الثالثه',3],['الرابعه',4],['الخامسه',5],['السادسه',6],['السابعه',7],['الثامنه',8],['التاسعه',9],['العاشره',10]];
- for(const [name,id] of names)if(t.includes(name))return id;
+  .replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/ة/g,'ه')
+  .replace(/\s+/g,' ');
+ const numeric=text.match(/\d+/);if(numeric)return Number(numeric[0]);
+ const words=[['الحاديه عشره',11],['الثانيه عشره',12],['الثالثه عشره',13],
+ ['الحاديه عشر',11],['الثانيه عشر',12],['الثالثه عشر',13],
+ ['الاولي',1],['الثانيه',2],['الثالثه',3],['الرابعه',4],['الخامسه',5],
+ ['السادسه',6],['السابعه',7],['الثامنه',8],['التاسعه',9],['العاشره',10]];
+ for(const [word,n] of words)if(text.includes(word))return n;
  return null;
 }
 
@@ -202,12 +218,12 @@ const docAssetUrl=path=>new URL(path,location.href).href;
 async function searchDocuments(){
  const q=$('docSearch').value.trim();
  if(q.length<2){$('docSearchMsg').textContent='اكتبي حرفين على الأقل للبحث';return;}
- try{await refreshDocumentTemplates()}catch(e){console.error('فشل تحميل القوالب',e);$('docSearchMsg').textContent='تعذر تحميل القوالب: '+e.message;return;}$('docSearchMsg').textContent='جارٍ البحث...';$('docResults').replaceChildren();
+ await refreshDocumentTemplates();$('docSearchMsg').textContent='جارٍ البحث...';$('docResults').replaceChildren();
  try{const r=await json('/documents/search?q='+encodeURIComponent(q));$('docSearchMsg').textContent=`تم العثور على ${r.records.length} نتيجة (الحد الأقصى 40)`;
  for(const rec of r.records){const btn=node('button');btn.type='button';btn.className='doc-person';const name=node('strong',rec.payload?.[docNameKey]||'بدون اسم');const meta=node('div',`الدفعة: ${rec.payload?.[docBatchKey]||'—'} | الهوية: ${rec.payload?.['رقم الهوية الوطنية']||'—'} | ${rec.sheet_name}`);meta.className='doc-meta';btn.append(name,meta);btn.onclick=()=>{document.querySelectorAll('.doc-person').forEach(b=>b.classList.remove('chosen'));btn.classList.add('chosen');selectDocPerson(rec)};$('docResults').append(btn)}
  }catch(e){$('docSearchMsg').textContent=e.message}
 }
-async function selectDocPerson(rec){if(!DOCUMENT_TEMPLATES.length){try{await refreshDocumentTemplates()}catch(e){console.error("تعذر تحميل قوالب المستندات",e);$("docSearchMsg").textContent="تعذر تحميل القوالب من الخادم: "+e.message;}}docPerson=rec;const name=String(rec.payload?.[docNameKey]||'');const batch=String(rec.payload?.[docBatchKey]||'').trim();$('docSelected').textContent=`${name} — الدفعة: ${batch} — الحالة: ${rec.payload?.['الحالة']||'—'}`;
+async function selectDocPerson(rec){await refreshDocumentTemplates();docPerson=rec;const name=String(rec.payload?.[docNameKey]||'');const batch=String(rec.payload?.[docBatchKey]||'').trim();$('docSelected').textContent=`${name} — الدفعة: ${batch} — الحالة: ${rec.payload?.['الحالة']||'—'}`;
  // عرض القوالب الأصلية المطابقة لدفعة المتدرب فقط؛ لا خطابات عامة أو بديلة.
  const batchId=docBatchNumber(batch);
  const matches=DOCUMENT_TEMPLATES.filter(t=>batchId!==null&&t.batch!=='جميع الدفعات'&&docBatchNumber(t.batch)===batchId);
