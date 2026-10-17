@@ -641,6 +641,11 @@ const docFields = {
 };
 const batchNumbers={'الأولى':1,'الثانية':2,'الثالثة':3,'الرابعة':4,'الخامسة':5,'السادسة':6,'السابعة':7,'الثامنة':8,'التاسعة':9,'العاشرة':10,'الحادية عشرة':11,'الثانية عشرة':12,'الثالثة عشرة':13};
 function batchNumber(value){const t=String(value??'').trim().replace(/[٠-٩]/g,d=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/[۰-۹]/g,d=>String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)));const m=t.match(/\d+/);if(m)return Number(m[0]);for(const [word,n] of Object.entries(batchNumbers))if(t.includes(word))return n;return null}
+async function allDocumentTemplates(){
+ const r=await db.query(`SELECT template_id AS id,batch_name AS batch,document_kind AS kind,document_type AS type,label,image_path AS image,orientation,name_settings AS name FROM public.trainee_document_templates WHERE enabled=true ORDER BY batch_name,document_kind,document_type`);
+ return r.rows;
+}
+app.get('/api/documents/templates',async(req,res,next)=>{try{res.json({templates:await allDocumentTemplates()})}catch(e){next(e)}});
 const allowedIssuerRoles = (process.env.DOCUMENT_ISSUER_ROLES || 'admin,exporter').split(',').map(x=>x.trim());
 // المواضع محفوظة مركزيًا لكل قالب؛ تعديلها محصور بالمدير.
 app.get('/api/documents/positions',async(req,res,next)=>{try{
@@ -649,7 +654,7 @@ app.get('/api/documents/positions',async(req,res,next)=>{try{
  }catch(e){next(e)}});
 app.put('/api/documents/positions/:templateId',async(req,res,next)=>{try{
  if(req.role!=='admin')return res.status(403).json({error:'تعديل مواضع الشهادات للمدير فقط'});
- const id=String(req.params.templateId);if(!DOCUMENT_TEMPLATES.some(t=>t.id===id))return res.status(404).json({error:'القالب غير معروف'});
+ const id=String(req.params.templateId);if(!(await allDocumentTemplates()).some(t=>t.id===id))return res.status(404).json({error:'القالب غير معروف'});
  const o=req.body||{};const valid=(n,a,b)=>typeof n==='number'&&Number.isFinite(n)&&n>=a&&n<=b;
  if(!valid(o.x,0,100)||!valid(o.y,0,100)||!valid(o.size,12,90)||!valid(o.width,20,100)||!/^#[0-9a-fA-F]{6}$/.test(o.color||''))return res.status(400).json({error:'قيم الموضع أو الخط غير صحيحة'});
  const position={x:o.x,y:o.y,size:o.size,width:o.width,color:o.color};
@@ -681,7 +686,7 @@ app.post('/api/documents/issue',async(req,res,next)=>{
     if(!allowedIssuerRoles.includes(req.role))return res.status(403).json({error:'الحساب غير مخوّل لإصدار المستندات'});
     const id=Number(req.body?.recordId),templateId=String(req.body?.templateId||'');
     if(!Number.isSafeInteger(id)||id<1)return res.status(400).json({error:'معرف المتدرب غير صحيح'});
-    const template=DOCUMENT_TEMPLATES.find(t=>t.id===templateId);
+    const template=(await allDocumentTemplates()).find(t=>t.id===templateId);
     if(!template)return res.status(400).json({error:'القالب غير مسجل في document-templates.js'});
     const r=await db.query('SELECT id,payload FROM public.trainee_records WHERE id=$1',[id]);
     if(!r.rowCount)return res.status(404).json({error:'المتدرب غير موجود'});

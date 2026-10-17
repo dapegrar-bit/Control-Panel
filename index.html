@@ -74,7 +74,8 @@ body[data-active-page="settings"] .site-footer{background:linear-gradient(100deg
 <script type="module">
 import {createClient} from 'https://esm.sh/@supabase/supabase-js@2';
 import {SUPABASE_URL,SUPABASE_ANON_KEY,API_BASE} from './config.js';
-import {DOCUMENT_TEMPLATES} from './document-templates.js';
+let DOCUMENT_TEMPLATES=[];
+async function refreshDocumentTemplates(){const data=await json('/documents/templates');DOCUMENT_TEMPLATES=data.templates||[];}
 const sb=createClient(SUPABASE_URL,SUPABASE_ANON_KEY),$=id=>document.getElementById(id);
 function showPage(page){document.querySelectorAll('[data-pane]').forEach(el=>{el.hidden=el.dataset.pane!==page});document.querySelectorAll('[data-page]').forEach(el=>{el.classList.toggle('active',el.dataset.page===page);el.setAttribute('aria-current',el.dataset.page===page?'page':'false')});if(page==='imports'&&role!=='admin')showPage('records')}
 const pageDescriptions={dashboard:'لوحة التحليلات والمؤشرات',records:'سجلات المتدربين وإدارتها',imports:'استيراد ملفات Excel ومتابعة الحفظ',reports:'التقارير والتصدير والطباعة',settings:'إعدادات ومعلومات النظام',documents:'إصدار الشهادات والخطابات وسجلها'};
@@ -189,6 +190,7 @@ function docBatchNumber(value){const t=String(value??'').trim().replace(/[٠-٩]
 const safeHtml=t=>String(t??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const docAssetUrl=path=>new URL(path,location.href).href;
 async function searchDocuments(){
+ await refreshDocumentTemplates();
  const q=$('docSearch').value.trim();$('docSearchMsg').textContent='جارٍ البحث...';$('docResults').replaceChildren();
  try{const r=await json('/documents/search?q='+encodeURIComponent(q));$('docSearchMsg').textContent=`تم العثور على ${r.records.length} نتيجة (الحد الأقصى 40)`;
  for(const rec of r.records){const btn=node('button');btn.type='button';btn.className='doc-person';const name=node('strong',rec.payload?.[docNameKey]||'بدون اسم');const meta=node('div',`الدفعة: ${rec.payload?.[docBatchKey]||'—'} | الهوية: ${rec.payload?.['رقم الهوية الوطنية']||'—'} | ${rec.sheet_name}`);meta.className='doc-meta';btn.append(name,meta);btn.onclick=()=>{document.querySelectorAll('.doc-person').forEach(b=>b.classList.remove('chosen'));btn.classList.add('chosen');selectDocPerson(rec)};$('docResults').append(btn)}
