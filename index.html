@@ -44,7 +44,7 @@ body[data-active-page="settings"] .site-footer{background:linear-gradient(100deg
 @media print{.current-page-name{display:none}}
 
 /* صفحة الشهادات والخطابات */
-.documents-layout{display:grid;grid-template-columns:minmax(300px,1.2fr) minmax(300px,1fr);gap:18px}.doc-card{background:linear-gradient(145deg,#ffffff,#effaf6);border:1px solid #d5eae3;border-radius:22px;padding:22px}.doc-results{display:grid;gap:9px;max-height:380px;overflow:auto}.doc-person{width:100%;text-align:right;background:white!important;color:#1d534a!important;border:1px solid #d3e5df!important;border-radius:12px!important;box-shadow:none!important;padding:12px!important}.doc-person.chosen{border-color:#159c85!important;background:#e6f8f1!important}.doc-meta{font-size:12px;color:#67847b;margin-top:6px}.doc-preview{aspect-ratio:1.414;position:relative;border-radius:15px;background:#edf3f1;border:1px dashed #a4c7b9;display:grid;place-items:center;overflow:hidden}.doc-preview img{width:100%;height:100%;object-fit:contain}.doc-preview .preview-name{position:absolute;transform:translate(-50%,-50%);white-space:nowrap;text-align:center;font-family:'DIN Next LT Arabic',Tahoma,sans-serif;font-weight:600;max-width:85%;overflow:hidden;text-overflow:ellipsis}.doc-history{max-height:310px;overflow:auto}.doc-history table{width:100%;border-collapse:collapse;font-size:12px}.doc-history td,.doc-history th{padding:9px;border-bottom:1px solid #dcebe6;text-align:right}.doc-form{display:grid;gap:12px}.doc-form select,.doc-form input{width:100%;min-width:0}.doc-help{color:#637f76;font-size:13px}.doc-note{background:#fff9e9;border:1px solid #f1dfae;border-radius:12px;padding:12px;font-size:12px;color:#6c5b32}@media(max-width:850px){.documents-layout{grid-template-columns:1fr}}
+.documents-layout{display:grid;grid-template-columns:minmax(300px,1.2fr) minmax(300px,1fr);gap:18px}.doc-card{background:linear-gradient(145deg,#ffffff,#effaf6);border:1px solid #d5eae3;border-radius:22px;padding:22px}.doc-results{display:grid;gap:9px;max-height:380px;overflow:auto}.doc-person{width:100%;text-align:right;background:white!important;color:#1d534a!important;border:1px solid #d3e5df!important;border-radius:12px!important;box-shadow:none!important;padding:12px!important}.doc-person.chosen{border-color:#159c85!important;background:#e6f8f1!important}.doc-meta{font-size:12px;color:#67847b;margin-top:6px}.doc-preview{aspect-ratio:1.414;position:relative;border-radius:15px;background:#edf3f1;border:1px dashed #a4c7b9;display:grid;place-items:center;overflow:hidden}.doc-preview img{display:block;width:100%;height:100%;object-fit:contain}.doc-preview .preview-name{position:absolute;transform:translate(-50%,-50%);white-space:nowrap;text-align:center;font-family:'DIN Next LT Arabic',Tahoma,sans-serif;font-weight:600;max-width:85%;overflow:hidden;text-overflow:ellipsis}.doc-history{max-height:310px;overflow:auto}.doc-history table{width:100%;border-collapse:collapse;font-size:12px}.doc-history td,.doc-history th{padding:9px;border-bottom:1px solid #dcebe6;text-align:right}.doc-form{display:grid;gap:12px}.doc-form select,.doc-form input{width:100%;min-width:0}.doc-help{color:#637f76;font-size:13px}.doc-note{background:#fff9e9;border:1px solid #f1dfae;border-radius:12px;padding:12px;font-size:12px;color:#6c5b32}@media(max-width:850px){.documents-layout{grid-template-columns:1fr}}
 
 /* محرر موضع الاسم فوق القوالب الأصلية */
 .doc-preview .preview-name{cursor:grab;touch-action:none;user-select:none;z-index:3;border:1px dashed transparent;padding:3px 7px;border-radius:6px}
@@ -242,8 +242,17 @@ function updateDocName(){const name=$('docPreview').querySelector('.preview-name
 }
 function renderDocPreview(){const raw=DOCUMENT_TEMPLATES.find(x=>x.id===$('docTemplate').value);$('docPreview').replaceChildren();$('docIssue').disabled=!raw||!docPerson;$('docEditor').hidden=!raw||!docAdmin();
  if(!raw){$('docPreview').append(node('span','اختاري القالب لمعاينته'));$('docTemplateHint').textContent='';docDraft=null;return}
- const t=docEffective(raw);docDraft={...t.name};$('docPreview').style.aspectRatio=t.orientation==='portrait'?'0.707':'1.414';const img=document.createElement('img');img.src=docAssetUrl(t.image);img.alt=t.label;
- img.onerror=()=>{$('docTemplateHint').textContent='صورة القالب غير موجودة: '+t.image;$('docIssue').disabled=true};img.onload=()=>{$('docTemplateHint').textContent='راجعي موضع الاسم قبل الإصدار؛ يمكنك سحبه وحفظ الموضع.';$('docIssue').disabled=false};$('docPreview').append(img);
+ const t=docEffective(raw);docDraft={...t.name};
+ const preview=$('docPreview');preview.style.width='100%';preview.style.maxWidth='100%';
+ const img=document.createElement('img');img.src=docAssetUrl(t.image);img.alt=t.label;
+ img.onerror=()=>{$('docTemplateHint').textContent='صورة القالب غير موجودة: '+t.image;$('docIssue').disabled=true};img.onload=()=>{
+  const preview=$('docPreview');
+  preview.style.aspectRatio=`${img.naturalWidth} / ${img.naturalHeight}`;
+  preview.style.width=`min(100%, ${img.naturalWidth}px)`;
+  preview.style.maxWidth='100%';
+  $('docTemplateHint').textContent=`مقاس القالب الأصلي: ${img.naturalWidth} × ${img.naturalHeight} بكسل — بدون تمديد أو قص.`;
+  $('docIssue').disabled=false;
+ };$('docPreview').append(img);
  const name=node('span',docPerson?.payload?.[docNameKey]||'');name.className='preview-name';$('docPreview').append(name);updateDocName();
  if(docAdmin()){
   name.addEventListener('pointerdown',e=>{e.preventDefault();name.setPointerCapture(e.pointerId);name.classList.add('dragging')});
@@ -256,23 +265,54 @@ $('docColor').addEventListener('input',()=>{if(!docDraft)return;docDraft.color=$
 $('docSavePosition').onclick=async()=>{const t=DOCUMENT_TEMPLATES.find(x=>x.id===$('docTemplate').value);if(!t||!docAdmin())return;
  $('docEditorMsg').textContent='جارٍ الحفظ...';try{await json('/documents/positions/'+encodeURIComponent(t.id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(docDraft)});docOverrides[t.id]={...docDraft};$('docEditorMsg').textContent='✓ حُفظ موضع الاسم لهذا القالب في قاعدة البيانات'}catch(e){$('docEditorMsg').textContent=e.message}};
 $('docResetPosition').onclick=()=>{const t=DOCUMENT_TEMPLATES.find(x=>x.id===$('docTemplate').value);if(!t)return;docDraft={...t.name};updateDocName();$('docEditorMsg').textContent='تمت إعادة المعاينة للوضع الأصلي؛ اضغطي حفظ لاعتماده.'};
-function openDocPrintWindow(t,name,w){if(!w)throw Error('تعذر فتح نافذة الطباعة');
- const imageUrl=docAssetUrl(t.image),fontUrl=docAssetUrl('assets/fonts/din-next-lt-arabic.woff2');
- const paper=t.orientation==='portrait'?'portrait':'landscape';const n=t.name;
- // نستخدم DOM textContent بدلاً من إدراج اسم المتدرب كنص HTML.
- w.document.open();w.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>مستند تدريبي</title><style>@font-face{font-family:DINDoc;src:url('${fontUrl}') format('woff2');font-display:block}@page{size:A4 ${paper};margin:0}html,body{padding:0;margin:0;width:100%;height:100%}body{overflow:hidden}.paper{position:relative;width:100vw;height:100vh;page-break-after:avoid}.bg{position:absolute;width:100%;height:100%;object-fit:fill}.name{position:absolute;transform:translate(-50%,-50%);font-family:DINDoc,'DIN Next LT Arabic',Tahoma,sans-serif;font-size:${Number(n.size)||32}pt;color:${n.color||'#1F4E46'};font-weight:600;text-align:center;white-space:nowrap;max-width:${Number(n.width)||80}%;overflow:hidden;text-overflow:ellipsis;left:${Number(n.x)||50}%;top:${Number(n.y)||50}%}@media print{*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-/* محرر موضع الاسم فوق القوالب الأصلية */
-.doc-preview .preview-name{cursor:grab;touch-action:none;user-select:none;z-index:3;border:1px dashed transparent;padding:3px 7px;border-radius:6px}
-.doc-preview .preview-name:hover,.doc-preview .preview-name.dragging{border-color:#19a48c;background:#ffffff44;cursor:grabbing}
-.doc-editor{background:#f3faf7;border:1px solid #cde5db;border-radius:14px;padding:12px;display:grid;gap:10px}
-.doc-editor .controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
-.doc-editor label{font-size:12px;color:#24574e;display:grid;gap:4px}
-.doc-editor input{min-width:0;width:100%;padding:7px}
-.doc-editor input[type=color]{height:38px}
-.doc-editor .toolbar{display:flex;gap:8px;flex-wrap:wrap}
-@media(max-width:550px){.doc-editor .controls{grid-template-columns:1fr 1fr}}
-</style></head><body><div class="paper"><img id="bg" class="bg" alt="قالب المستند"><div class="name" id="traineeName"></div></div></body></html>`);w.document.close();w.document.getElementById('bg').src=imageUrl;w.document.getElementById('traineeName').textContent=name;
- Promise.all([w.document.fonts.ready,new Promise(resolve=>{const im=w.document.getElementById('bg');if(im.complete)resolve();else{im.onload=resolve;im.onerror=resolve}})]).then(()=>{w.focus();w.print()});return w}
+function safePdfFileName(name){
+ return String(name||'متدرب').trim().replace(/[\\/:*?"<>|\u0000-\u001F]/g,'-').replace(/\s+/g,' ').slice(0,130)||'متدرب';
+}
+function openDocPrintWindow(t,name,w){
+ if(!w)throw Error('تعذر فتح نافذة الطباعة');
+ const imageUrl=docAssetUrl(t.image);
+ const fontUrl=docAssetUrl('assets/fonts/din-next-lt-arabic.woff2');
+ const n=t.name||{};
+ const cleanName=safePdfFileName(name);
+ const doc=w.document;
+ // إنشاء عناصر آمنة: لا نضع اسم المتدرب داخل HTML.
+ doc.open();
+ doc.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>مستند</title><style id="printSize"></style><style>
+ @font-face{font-family:DINDoc;src:url('${fontUrl}') format('woff2');font-display:swap}
+ html,body{margin:0;padding:0;background:#fff}
+ .paper{position:relative;overflow:hidden;margin:0 auto;page-break-inside:avoid;break-inside:avoid}
+ .bg{display:block;position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+ .name{position:absolute;transform:translate(-50%,-50%);font-family:DINDoc,'DIN Next LT Arabic',Tahoma,sans-serif;font-weight:600;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ @media print{html,body{width:100%;height:100%}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+ </style></head><body><div class="paper"><img id="bg" class="bg" alt=""><div class="name" id="traineeName"></div></div></body></html>`);
+ doc.close();
+ doc.title=cleanName;
+ const bg=doc.getElementById('bg'), label=doc.getElementById('traineeName');
+ label.textContent=String(name||'');
+ bg.onload=async()=>{
+  const iw=bg.naturalWidth,ih=bg.naturalHeight;
+  if(!iw||!ih)return;
+  // المقاس الفيزيائي للصورة وفق 96 CSS px/in؛ لا نكبرها أبدًا.
+  // يُصغَّر القالب عند تجاوز حدود A4 فقط، دون تغيير نسبته.
+  const landscape=iw>=ih;
+  const limitW=landscape?297:210,limitH=landscape?210:297;
+  const originalW=iw*25.4/96,originalH=ih*25.4/96;
+  const scale=Math.min(1,limitW/originalW,limitH/originalH);
+  const widthMm=originalW*scale,heightMm=originalH*scale;
+  doc.getElementById('printSize').textContent=
+   `@page{size:${widthMm.toFixed(3)}mm ${heightMm.toFixed(3)}mm;margin:0}`+
+   `.paper{width:${widthMm.toFixed(3)}mm;height:${heightMm.toFixed(3)}mm}`+
+   `.name{left:${Number(n.x??50)}%;top:${Number(n.y??50)}%;`+
+   `color:${/^#[0-9a-f]{6}$/i.test(n.color)?n.color:'#1F4E46'};`+
+   `font-size:${Math.max(8,Number(n.size)||32)*scale}pt;`+
+   `max-width:${Number(n.width??74)}%}`;
+  try{await doc.fonts.ready}catch{}
+  w.focus();w.print();
+ };
+ bg.onerror=()=>{doc.body.textContent='تعذر تحميل صورة القالب؛ تحققي من وجودها في مجلد templates.'};
+ bg.src=imageUrl;
+ return w;
+}
 async function issueDocument(){const raw=DOCUMENT_TEMPLATES.find(x=>x.id===$('docTemplate').value);if(!docPerson||!raw)return;const t=docEffective(raw);
  // فتح النافذة ضمن نقرة المستخدم مباشرة لتجنب حظر النوافذ المنبثقة.
  let w;try{w=window.open('','_blank');if(!w)throw Error('اسمحي بالنوافذ المنبثقة')}catch(e){$('docIssueStatus').textContent=e.message;return}
