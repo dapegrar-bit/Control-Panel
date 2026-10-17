@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="3508" height="2480" viewBox="0 0 3508 2480">
+ <defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#fbfffd"/><stop offset="1" stop-color="#edf8f3"/></linearGradient><linearGradient id="bar"><stop stop-color="#0c4d48"/><stop offset="1" stop-color="#1F4E46"/></linearGradient></defs>
+ <rect width="3508" height="2480" fill="url(#bg)"/><path d="M0 0 H3508 V173 Q1754 297 0 173Z" fill="url(#bar)"/>
+ <rect x="100" y="100" width="3308" height="2280" rx="35" fill="none" stroke="#1F4E46" stroke-width="8" opacity=".35"/>
+ <circle cx="420" cy="2108" r="372" fill="#1F4E46" opacity=".05"/><circle cx="3157" cy="421" r="347" fill="#1F4E46" opacity=".06"/>
+ <text x="1754" y="520" font-family="Tahoma,Arial,sans-serif" font-size="115" fill="#1F4E46" font-weight="bold" text-anchor="middle">شهادة حضور</text>
+ <text x="1754" y="620" font-family="Arial,sans-serif" font-size="40" fill="#75958a" text-anchor="middle">CERTIFICATE OF ATTENDANCE</text>
+ <text x="1754" y="1209" font-family="Tahoma,Arial,sans-serif" font-size="48" fill="#5a8073" text-anchor="middle">تُمنح إلى</text>
+ <line x1="701" y1="1419" x2="2806" y2="1419" stroke="#1F4E46" stroke-width="3" opacity=".4"/>
+ <text x="1754" y="2108" font-family="Tahoma,Arial,sans-serif" font-size="36" fill="#779489" text-anchor="middle">قالب تجريبي — استبدليه بالتصميم المعتمد لهذه الدفعة</text>
+ </svg>

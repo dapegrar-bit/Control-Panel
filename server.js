@@ -1,4 +1,5 @@
 import express from 'express';
+import { DOCUMENT_TEMPLATES } from './document-templates.js';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -72,6 +73,7 @@ async function guard(req, res, next) {
     const result = await db.query('SELECT role FROM app_private.user_roles WHERE user_id = $1', [data.user.id]);
     if (!result.rows.length) return res.sendStatus(403);
     req.userId = data.user.id;
+    req.userEmail = data.user.email || null;
     req.role = result.rows[0].role;
     next();
   } catch (error) { next(error); }
@@ -631,6 +633,55 @@ app.post('/api/import/start/:mode', adminOnly, receiveExcel, async (req,res,next
 });
 // Prevent memory growth; active jobs are never evicted.
 setInterval(()=>{for(const [id,job] of importJobs){if(job.endedAt && Date.now()-job.endedAt>60*60*1000)importJobs.delete(id)}},15*60*1000).unref();
+
+// إصدار المستندات: البحث والأثر التدقيقي يتمان على الخادم وليس على المتصفح فقط.
+const docFields = {
+  batch:'الدفعة', status:'الحالة', name:'الاسم الثلاثي ( باللغة العربية )',
+  email:'الايميل', phone:'رقم الجوال', nationalId:'رقم الهوية الوطنية'
+};
+const allowedIssuerRoles = (process.env.DOCUMENT_ISSUER_ROLES || 'admin,exporter').split(',').map(x=>x.trim());
+app.get('/api/documents/search', async(req,res,next)=>{
+  try {
+    const term=String(req.query.q||'').trim().slice(0,120);
+    if(term.length<2)return res.status(400).json({error:'اكتبي حرفين على الأقل للبحث'});
+    const result=await db.query(`SELECT id,sheet_name,payload FROM public.trainee_records
+      WHERE payload::text ILIKE $1 ORDER BY id DESC LIMIT 40`,['%'+term+'%']);
+    res.json({records:result.rows});
+  }catch(e){next(e)}
+});
+app.get('/api/documents/history/:recordId',async(req,res,next)=>{
+  try{
+    const id=Number(req.params.recordId);
+    if(!Number.isSafeInteger(id)||id<1)return res.status(400).json({error:'معرف غير صحيح'});
+    const r=await db.query(`SELECT id,template_id,document_kind,document_type,batch_name,trainee_name,
+      issued_by,issuer_email,issuer_role,action,created_at FROM public.trainee_document_issues
+      WHERE trainee_record_id=$1 ORDER BY created_at DESC LIMIT 100`,[id]);
+    res.json({total:r.rows.length,history:r.rows});
+  }catch(e){next(e)}
+});
+app.post('/api/documents/issue',async(req,res,next)=>{
+  try{
+    if(!allowedIssuerRoles.includes(req.role))return res.status(403).json({error:'الحساب غير مخوّل لإصدار المستندات'});
+    const id=Number(req.body?.recordId),templateId=String(req.body?.templateId||'');
+    if(!Number.isSafeInteger(id)||id<1)return res.status(400).json({error:'معرف المتدرب غير صحيح'});
+    const template=DOCUMENT_TEMPLATES.find(t=>t.id===templateId);
+    if(!template)return res.status(400).json({error:'القالب غير مسجل في document-templates.js'});
+    const r=await db.query('SELECT id,payload FROM public.trainee_records WHERE id=$1',[id]);
+    if(!r.rowCount)return res.status(404).json({error:'المتدرب غير موجود'});
+    const data=r.rows[0].payload||{};
+    const batch=String(data[docFields.batch]??'').trim();
+    const name=String(data[docFields.name]??'').trim();
+    if(!name)return res.status(400).json({error:'اسم المتدرب غير موجود'});
+    if(batch!==template.batch)return res.status(409).json({error:'قالب المستند لا يطابق دفعة المتدرب'});
+    const out=await db.query(`INSERT INTO public.trainee_document_issues
+      (trainee_record_id,template_id,document_kind,document_type,batch_name,trainee_name,issued_by,issuer_email,issuer_role,action)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'prepared_for_print') RETURNING id,created_at`,
+      [id,template.id,template.kind,template.type,batch,name,req.userId,req.userEmail,req.role]);
+    const count=await db.query('SELECT COUNT(*)::int AS n FROM public.trainee_document_issues WHERE trainee_record_id=$1',[id]);
+    res.status(201).json({issueId:out.rows[0].id,createdAt:out.rows[0].created_at,totalIssues:count.rows[0].n,
+      trainee:{name,batch,status:String(data[docFields.status]??''),email:String(data[docFields.email]??''),phone:String(data[docFields.phone]??''),nationalId:String(data[docFields.nationalId]??'')}});
+  }catch(e){next(e)}
+});
 
 app.use((error, req, res, _next) => {
   if (res.headersSent) return;

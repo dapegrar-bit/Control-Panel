@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2480" height="3508" viewBox="0 0 2480 3508">
+ <defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#fbfffd"/><stop offset="1" stop-color="#edf8f3"/></linearGradient><linearGradient id="bar"><stop stop-color="#0c4d48"/><stop offset="1" stop-color="#1F4E46"/></linearGradient></defs>
+ <rect width="2480" height="3508" fill="url(#bg)"/><path d="M0 0 H2480 V245 Q1240 420 0 245Z" fill="url(#bar)"/>
+ <rect x="100" y="100" width="2280" height="3308" rx="35" fill="none" stroke="#1F4E46" stroke-width="8" opacity=".35"/>
+ <circle cx="297" cy="2981" r="526" fill="#1F4E46" opacity=".05"/><circle cx="2232" cy="596" r="491" fill="#1F4E46" opacity=".06"/>
+ <text x="1240" y="736" font-family="Tahoma,Arial,sans-serif" font-size="95" fill="#1F4E46" font-weight="bold" text-anchor="middle">خطاب رسمي</text>
+ <text x="1240" y="836" font-family="Arial,sans-serif" font-size="40" fill="#75958a" text-anchor="middle">OFFICIAL LETTER</text>
+ <text x="1240" y="1273" font-family="Tahoma,Arial,sans-serif" font-size="48" fill="#5a8073" text-anchor="middle">السيد / السيدة</text>
+ <line x1="496" y1="1483" x2="1984" y2="1483" stroke="#1F4E46" stroke-width="3" opacity=".4"/>
+ <text x="1240" y="2981" font-family="Tahoma,Arial,sans-serif" font-size="36" fill="#779489" text-anchor="middle">قالب تجريبي — استبدليه بالتصميم المعتمد لهذه الدفعة</text>
+ </svg>
