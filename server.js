@@ -56,7 +56,7 @@ app.use(cors({
     if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
     callback(new Error('Origin not allowed'));
   },
-  methods: ['GET', 'POST', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json({ limit: '128kb' }));
@@ -639,7 +639,24 @@ const docFields = {
   batch:'الدفعة', status:'الحالة', name:'الاسم الثلاثي ( باللغة العربية )',
   email:'الايميل', phone:'رقم الجوال', nationalId:'رقم الهوية الوطنية'
 };
+const batchNumbers={'الأولى':1,'الثانية':2,'الثالثة':3,'الرابعة':4,'الخامسة':5,'السادسة':6,'السابعة':7,'الثامنة':8,'التاسعة':9,'العاشرة':10,'الحادية عشرة':11,'الثانية عشرة':12,'الثالثة عشرة':13};
+function batchNumber(value){const t=String(value??'').trim().replace(/[٠-٩]/g,d=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/[۰-۹]/g,d=>String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)));const m=t.match(/\d+/);if(m)return Number(m[0]);for(const [word,n] of Object.entries(batchNumbers))if(t.includes(word))return n;return null}
 const allowedIssuerRoles = (process.env.DOCUMENT_ISSUER_ROLES || 'admin,exporter').split(',').map(x=>x.trim());
+// المواضع محفوظة مركزيًا لكل قالب؛ تعديلها محصور بالمدير.
+app.get('/api/documents/positions',async(req,res,next)=>{try{
+ const r=await db.query('SELECT template_id, name_position FROM public.trainee_document_positions');
+ res.json({positions:Object.fromEntries(r.rows.map(x=>[x.template_id,x.name_position]))});
+ }catch(e){next(e)}});
+app.put('/api/documents/positions/:templateId',async(req,res,next)=>{try{
+ if(req.role!=='admin')return res.status(403).json({error:'تعديل مواضع الشهادات للمدير فقط'});
+ const id=String(req.params.templateId);if(!DOCUMENT_TEMPLATES.some(t=>t.id===id))return res.status(404).json({error:'القالب غير معروف'});
+ const o=req.body||{};const valid=(n,a,b)=>typeof n==='number'&&Number.isFinite(n)&&n>=a&&n<=b;
+ if(!valid(o.x,0,100)||!valid(o.y,0,100)||!valid(o.size,12,90)||!valid(o.width,20,100)||!/^#[0-9a-fA-F]{6}$/.test(o.color||''))return res.status(400).json({error:'قيم الموضع أو الخط غير صحيحة'});
+ const position={x:o.x,y:o.y,size:o.size,width:o.width,color:o.color};
+ await db.query(`INSERT INTO public.trainee_document_positions(template_id,name_position,updated_by) VALUES($1,$2::jsonb,$3)
+ ON CONFLICT(template_id) DO UPDATE SET name_position=EXCLUDED.name_position,updated_by=EXCLUDED.updated_by,updated_at=NOW()`,[id,JSON.stringify(position),req.userId]);
+ res.json({saved:true,position});
+ }catch(e){next(e)}});
 app.get('/api/documents/search', async(req,res,next)=>{
   try {
     const term=String(req.query.q||'').trim().slice(0,120);
@@ -672,7 +689,7 @@ app.post('/api/documents/issue',async(req,res,next)=>{
     const batch=String(data[docFields.batch]??'').trim();
     const name=String(data[docFields.name]??'').trim();
     if(!name)return res.status(400).json({error:'اسم المتدرب غير موجود'});
-    if(batch!==template.batch)return res.status(409).json({error:'قالب المستند لا يطابق دفعة المتدرب'});
+    if(!batchNumber(batch)||batchNumber(batch)!==batchNumber(template.batch))return res.status(409).json({error:'قالب المستند لا يطابق دفعة المتدرب'});
     const out=await db.query(`INSERT INTO public.trainee_document_issues
       (trainee_record_id,template_id,document_kind,document_type,batch_name,trainee_name,issued_by,issuer_email,issuer_role,action)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'prepared_for_print') RETURNING id,created_at`,

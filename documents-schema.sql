@@ -18,3 +18,12 @@ CREATE INDEX IF NOT EXISTS idx_trainee_document_issues_record ON public.trainee_
 CREATE INDEX IF NOT EXISTS idx_trainee_document_issues_user ON public.trainee_document_issues (issued_by,created_at DESC);
 -- الوصول إلى هذا الجدول يكون عبر الخادم المصادق عليه، لا عبر Supabase anon.
 ALTER TABLE public.trainee_document_issues ENABLE ROW LEVEL SECURITY;
+
+-- إعدادات موضع الاسم: مشتركة بين الأجهزة والحسابات، والكتابة للمدير عبر API فقط.
+CREATE TABLE IF NOT EXISTS public.trainee_document_positions (
+ template_id TEXT PRIMARY KEY,
+ name_position JSONB NOT NULL,
+ updated_by UUID NOT NULL,
+ updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE public.trainee_document_positions ENABLE ROW LEVEL SECURITY;
