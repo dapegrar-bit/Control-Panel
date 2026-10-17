@@ -58,7 +58,7 @@ app.use(cors({
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
-app.use(express.json({ limit: '16kb' }));
+app.use(express.json({ limit: '128kb' }));
 app.use(rateLimit({ windowMs: 60_000, limit: 80, standardHeaders: 'draft-7', legacyHeaders: false }));
 
 app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'Trainees Management System' }));
@@ -172,6 +172,9 @@ const TRAINEE_COLUMNS = Object.freeze([
 // Upload directly to a temporary file: no file-size-sized Buffer retained in Node's heap.
 const MAX_FILE_BYTES = 35 * 1024 * 1024;
 const MAX_RECORDS = 80_000;
+const ID_COLUMN = 'رقم الهوية الوطنية';
+const NAME_COLUMN = 'الاسم الثلاثي ( باللغة العربية )';
+const PHONE_COLUMN = 'رقم الجوال';
 const BATCH_SIZE = 75;
 const excelUpload = multer({
   storage: multer.diskStorage({
@@ -254,15 +257,12 @@ async function parseWorkbookFile(path, onRecord = null) {
     for await (const row of sheet) {
       if (!headerRead) {
         if (row.number !== 1) throw importError(`الورقة ${sheet.name}: عناوين الأعمدة يجب أن تكون في الصف الأول`);
-        const actualHeaders = TRAINEE_COLUMNS.map((_, i) => normalizedHeading(excelValue(row.getCell(i + 1))));
-        const mismatches = TRAINEE_COLUMNS.filter((header, i) =>
-          actualHeaders[i] !== normalizedHeading(header));
-        if (mismatches.length) {
-          throw importError(`الورقة ${sheet.name}: أسماء الأعمدة أو ترتيبها لا تطابق الأعمدة الـ21 المطلوبة. أول عمود مختلف: ${mismatches[0]}`);
-        }
-        const extras = row.values.slice(TRAINEE_COLUMNS.length + 1);
-        if (extras.some(value => value !== null && value !== undefined && value !== '')) {
-          throw importError(`الورقة ${sheet.name}: توجد أعمدة إضافية بعد العمود 21`);
+        // Match by column position; header spelling and extra whitespace may differ.
+        // The output keys always use the 21 canonical column names.
+        if (!row.getCell(1).value) throw importError(`الورقة ${sheet.name}: الصف الأول لا يحتوي على عناوين`);
+        for (let i=0;i<TRAINEE_COLUMNS.length;i++) {
+          if (normalizedHeading(excelValue(row.getCell(i+1))) !== normalizedHeading(TRAINEE_COLUMNS[i]))
+            throw importError(`الورقة ${sheet.name}: العمود ${i+1} يجب أن يكون «${TRAINEE_COLUMNS[i].trim()}»؛ الموجود «${String(excelValue(row.getCell(i+1))??'فارغ').slice(0,100)}»`);
         }
         headerRead = true;
         continue;
@@ -290,30 +290,121 @@ async function parseWorkbookFile(path, onRecord = null) {
   return { sheets, total };
 }
 
-// Batch inserts and adapt to either existing DB schema: with/without row_number.
+// Matching is based on national ID only. Records without ID are not auto-merged.
+function identity(payload) { return String(payload?.[ID_COLUMN] ?? '').trim(); }
+function cleanPayload(input, partial = false) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw importError('بيانات السجل غير صحيحة');
+  const result = {};
+  for (const key of TRAINEE_COLUMNS) {
+    if (partial && !Object.hasOwn(input, key)) continue;
+    const value = input[key];
+    if (value !== null && value !== undefined && typeof value === 'object') throw importError(`قيمة غير صالحة في ${key}`);
+    result[key] = value === null || value === undefined ? null : String(value).trim();
+    if (result[key]?.length > 2000) throw importError(`قيمة طويلة جدًا في ${key}`);
+  }
+  return result;
+}
 async function hasRowNumberColumn(client) {
-  const result = await client.query(`
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema='public' AND table_name='trainee_records' AND column_name='row_number'
-  `);
-  return result.rowCount > 0;
+  const r = await client.query(`SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='trainee_records' AND column_name='row_number'`);
+  return r.rowCount > 0;
 }
-async function insertBatch(client, batch, rowNumberEnabled, sheetOffsets) {
-  if (!batch.length) return;
-  const args = [];
-  const placeholders = batch.map((record, i) => {
-    if (rowNumberEnabled) {
-      const index = (sheetOffsets.get(record.sheet) || 0) + 1;
-      sheetOffsets.set(record.sheet, index);
-      args.push(record.sheet, index, JSON.stringify(record.payload));
-      return `($${3*i+1},$${3*i+2},$${3*i+3}::jsonb)`;
+async function nextRowNumber(client, sheet) {
+  const r = await client.query('SELECT COALESCE(MAX(row_number),0)+1 AS n FROM public.trainee_records WHERE sheet_name=$1', [sheet]);
+  return Number(r.rows[0].n);
+}
+async function insertOne(client, sheet, payload, rowNumberEnabled) {
+  if (rowNumberEnabled) {
+    const n = await nextRowNumber(client, sheet);
+    return client.query('INSERT INTO public.trainee_records(sheet_name,row_number,payload) VALUES($1,$2,$3::jsonb) RETURNING id', [sheet,n,JSON.stringify(payload)]);
+  }
+  return client.query('INSERT INTO public.trainee_records(sheet_name,payload) VALUES($1,$2::jsonb) RETURNING id', [sheet,JSON.stringify(payload)]);
+}
+// Keep a unique national-ID index in memory, not the full workbook. Detect ambiguous preexisting duplicates.
+async function identityIndex(client) {
+  const r = await client.query(`SELECT id, TRIM(payload->>$1) AS national_id FROM public.trainee_records WHERE NULLIF(TRIM(payload->>$1),'') IS NOT NULL`, [ID_COLUMN]);
+  const map = new Map();
+  for (const row of r.rows) {
+    if (map.has(row.national_id)) map.set(row.national_id, null);
+    else map.set(row.national_id, row.id);
+  }
+  return map;
+}
+async function upsertRecord(client, sheet, payload, index, rowNumberEnabled) {
+  const id = identity(payload);
+  if (id && index.has(id)) {
+    const recordId = index.get(id);
+    if (recordId === null) throw importError(`الهوية ${id} مكررة مسبقًا في قاعدة البيانات؛ يجب مراجعتها يدويًا`);
+    await client.query(`UPDATE public.trainee_records SET payload = payload || $1::jsonb WHERE id=$2`, [JSON.stringify(payload),recordId]);
+    return 'updated';
+  }
+  if (!id) {
+    // Without national ID, only exact same sheet + payload can be considered a duplicate.
+    // Do not guess identity from name or phone number.
+    const same = await client.query('SELECT id FROM public.trainee_records WHERE sheet_name=$1 AND payload=$2::jsonb LIMIT 1', [sheet, JSON.stringify(payload)]);
+    if (same.rowCount) return 'unchanged';
+  }
+  const inserted = await insertOne(client, sheet, payload, rowNumberEnabled);
+  if (id) index.set(id, inserted.rows[0].id);
+  return 'added';
+}
+app.get('/api/columns', (_req,res) => res.json(TRAINEE_COLUMNS));
+
+const DASH_FIELDS = ['الجنس','المنطقة','المؤهل الدراسي','الدفعة','العام','الحالة'];
+app.post('/api/dashboard', async(req,res,next)=>{
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter(Number.isSafeInteger).filter(x=>x>0).slice(0,1000) : [];
+    const useIds = req.body?.selectedOnly === true;
+    if(useIds && !ids.length) return res.json({total:0,groups:Object.fromEntries(DASH_FIELDS.map(x=>[x,[]]))});
+    const f=filters({sheet:req.body?.sheet,search:req.body?.search});
+    const clauses=[];const args=[...f.args];
+    if(f.sql) clauses.push(f.sql.slice(6));
+    if(useIds){args.push(ids);clauses.push(`id = ANY($${args.length}::bigint[])`);}
+    const where=clauses.length?'WHERE '+clauses.join(' AND '):'';
+    const result=await db.query(`SELECT COUNT(*)::int AS total FROM public.trainee_records ${where}`,args);
+    const groups={};
+    for(const field of DASH_FIELDS){
+      const r=await db.query(`SELECT COALESCE(NULLIF(TRIM(payload->>$${args.length+1}),''),'غير محدد') AS label,COUNT(*)::int AS count FROM public.trainee_records ${where} GROUP BY 1 ORDER BY count DESC,label LIMIT 30`,[...args,field]);
+      groups[field]=r.rows;
     }
-    args.push(record.sheet, JSON.stringify(record.payload));
-    return `($${2*i+1},$${2*i+2}::jsonb)`;
-  });
-  const columns = rowNumberEnabled ? '(sheet_name,row_number,payload)' : '(sheet_name,payload)';
-  await client.query(`INSERT INTO public.trainee_records ${columns} VALUES ${placeholders.join(',')}`, args);
-}
+    res.json({total:result.rows[0].total,groups});
+  }catch(error){next(error);}
+});
+
+app.post('/api/records', adminOnly, async (req,res,next) => {
+  let client;
+  try {
+    const sheet = String(req.body?.sheet_name || 'إضافة مباشرة').trim().slice(0,200);
+    const payload = cleanPayload(req.body?.payload);
+    if (!payload[NAME_COLUMN] && !identity(payload)) throw importError('أدخلي الاسم أو رقم الهوية');
+    client = await db.connect(); await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(84621831)');
+    const index = await identityIndex(client);
+    const result = await upsertRecord(client,sheet,payload,index,await hasRowNumberColumn(client));
+    await client.query('COMMIT'); res.status(result==='added'?201:200).json({status:result});
+  } catch(e) { if(client) await client.query('ROLLBACK').catch(()=>{}); next(e); }
+  finally { client?.release(); }
+});
+app.patch('/api/records/:id', adminOnly, async(req,res,next)=>{
+  let client;
+  try {
+    const id=Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id<=0) throw importError('رقم السجل غير صالح');
+    const changes=cleanPayload(req.body?.payload,true);
+    if(!Object.keys(changes).length) throw importError('لا توجد تعديلات');
+    client=await db.connect(); await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(84621831)');
+    const old=await client.query('SELECT payload FROM public.trainee_records WHERE id=$1 FOR UPDATE',[id]);
+    if(!old.rowCount) { const e=new Error('السجل غير موجود');e.status=404;throw e; }
+    const merged={...old.rows[0].payload,...changes};
+    const nationalId=identity(merged);
+    if(nationalId) {
+      const conflict=await client.query(`SELECT id FROM public.trainee_records WHERE id<>$1 AND TRIM(payload->>$2)=$3 LIMIT 1`,[id,ID_COLUMN,nationalId]);
+      if(conflict.rowCount) {const e=new Error('رقم الهوية موجود في سجل آخر');e.status=409;throw e;}
+    }
+    await client.query('UPDATE public.trainee_records SET payload=$1::jsonb WHERE id=$2',[JSON.stringify(merged),id]);
+    await client.query('COMMIT'); res.json({updated:true,id});
+  }catch(e){if(client) await client.query('ROLLBACK').catch(()=>{});next(e);}finally{client?.release();}
+});
 
 app.post('/api/import/preview', adminOnly, receiveExcel, async (req, res, next) => {
   try {
@@ -325,65 +416,35 @@ app.post('/api/import/preview', adminOnly, receiveExcel, async (req, res, next) 
 });
 
 app.post('/api/import/upload', adminOnly, receiveExcel, async (req, res, next) => {
-  let client = null;
-  let committed = false;
+  let client;
   try {
     if (!req.file) throw importError('اختاري ملف Excel');
     const hash = await fileHash(req.file.path);
-    client = await db.connect();
-    await client.query('BEGIN');
+    client = await db.connect(); await client.query('BEGIN');
     await client.query('SELECT pg_advisory_xact_lock(84621831)');
-    const existing = await client.query('SELECT 1 FROM public.trainee_imports WHERE file_hash=$1', [hash]);
-    if (existing.rowCount) {
-      const error = new Error('تم استيراد هذا الملف سابقًا، ولن نكرر بياناته');
-      error.status = 409;
-      throw error;
-    }
-    const rowNumberEnabled = await hasRowNumberColumn(client);
-    const sheetOffsets = new Map();
-    if (rowNumberEnabled) {
-      const positions = await client.query(`
-        SELECT sheet_name, COALESCE(MAX(row_number),0)::int AS last_number
-        FROM public.trainee_records GROUP BY sheet_name
-      `);
-      for (const position of positions.rows) sheetOffsets.set(position.sheet_name, position.last_number);
-    }
-    let batch = [];
-    const parsed = await parseWorkbookFile(req.file.path, async record => {
-      batch.push(record);
-      if (batch.length >= BATCH_SIZE) {
-        await insertBatch(client, batch, rowNumberEnabled, sheetOffsets);
-        batch = [];
-      }
+    const existing=await client.query('SELECT 1 FROM public.trainee_imports WHERE file_hash=$1',[hash]);
+    if(existing.rowCount){const e=new Error('هذا الملف نفسه سبق استيراده');e.status=409;throw e;}
+    const index=await identityIndex(client);
+    const rowNumberEnabled=await hasRowNumberColumn(client);
+    let added=0,updated=0,unchanged=0;
+    const parsed=await parseWorkbookFile(req.file.path, async record=>{
+      const result=await upsertRecord(client,record.sheet,record.payload,index,rowNumberEnabled);
+      if(result==='updated') updated++; else if(result==='unchanged') unchanged++; else added++;
     });
-    await insertBatch(client, batch, rowNumberEnabled, sheetOffsets);
-    await client.query(
-      'INSERT INTO public.trainee_imports(file_hash,file_name,row_count) VALUES ($1,$2,$3)',
-      [hash, req.file.originalname, parsed.total]
-    );
+    await client.query('INSERT INTO public.trainee_imports(file_hash,file_name,row_count) VALUES($1,$2,$3)',[hash,req.file.originalname,parsed.total]);
     await client.query('COMMIT');
-    committed = true;
-    res.json({ imported: parsed.total, sheets: parsed.sheets });
-  } catch (error) {
-    if (client && !committed) {
-      try { await client.query('ROLLBACK'); } catch (rollbackError) {
-        console.error('Import rollback failed:', rollbackError.message);
-      }
-    }
-    next(error);
-  } finally {
-    if (client) client.release();
-    await cleanTemp(req.file);
-  }
+    res.json({imported:parsed.total,added,updated,unchanged,sheets:parsed.sheets});
+  } catch(e){if(client) await client.query('ROLLBACK').catch(()=>{});next(e);}
+  finally{client?.release();await cleanTemp(req.file);}
 });
 
 app.use((error, req, res, _next) => {
   if (res.headersSent) return;
   if (error instanceof multer.MulterError) {
-    return res.status(400).json({ error: 'حجم الملف كبير أو نوع الرفع غير صالح (الحد 35MB)' });
+    return res.status(400).json({ error: error.code==='LIMIT_FILE_SIZE' ? 'حجم الملف أكبر من 35 ميجابايت' : `تعذر استقبال الملف: ${error.code}` });
   }
-  if (error.status === 400 || error.status === 409 || error.message?.includes('XLSX')) {
-    return res.status(error.status || 400).json({ error: error.message });
+  if ([400,404,409].includes(error.status) || error.message?.includes('XLSX') || /invalid|corrupt|zip|entry|unexpected end|encrypted/i.test(error.message||'')) {
+    return res.status(error.status || 400).json({ error: error.status ? error.message : 'ملف Excel تالف أو مشفر أو ليس بصيغة XLSX صحيحة' });
   }
   console.error('Server error:', { code: error.code || 'UNKNOWN', message: error.message, path: req.path });
   res.status(500).json({ error: 'حدث خطأ في الخادم' });
