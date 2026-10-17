@@ -39,6 +39,39 @@ button{background:linear-gradient(125deg,#176757,#20a28a);border-radius:12px;box
 .account-logout:hover{background:#fff1f1!important}
 @media(max-width:650px){.account-session{width:100%;justify-content:space-between;margin:6px 0 0;padding:9px 0 0;border-inline-start:0;border-top:1px solid #d9e9e4}#currentAccountEmail{max-width:210px}}
 @media print{.account-session{display:none!important}}
+
+/* بطاقة الحساب: تعديل شكلي مستقل عن بقية الموقع */
+.page-nav .account-session{
+ display:flex;align-items:center;gap:11px;flex:0 1 auto;
+ margin-inline-start:auto;padding:7px 11px;
+ border:1px solid #d8eae4;border-radius:16px;
+ background:linear-gradient(125deg,#f7fcfa,#edf7f3);
+ box-shadow:0 2px 10px rgba(11,67,55,.05);
+ min-width:0;max-width:100%;
+}
+.account-avatar{width:34px;height:34px;flex:0 0 34px;display:grid;place-items:center;
+ background:#d8eee6;border-radius:11px;font-size:17px}
+.page-nav .account-session-info{display:flex;flex-direction:column;gap:2px;min-width:0;line-height:1.35;text-align:right}
+.page-nav .account-session-caption{font-size:10px;font-weight:600;color:#6a857d}
+.page-nav #currentAccountEmail{font-size:12px;font-weight:700;color:#174b40;direction:ltr;text-align:right;
+ max-width:215px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+.page-nav #currentAccountRole{font-size:10px;color:#236b59;background:#e2f3eb;
+ border-radius:8px;padding:2px 7px;align-self:flex-start}
+.page-nav .account-logout{flex:0 0 auto;background:#fff!important;color:#b24747!important;
+ border:1px solid #e9caca!important;border-radius:10px;padding:8px 10px;
+ font-size:11px;font-weight:700;white-space:nowrap;cursor:pointer}
+.page-nav .account-logout:hover{background:#fff0f0!important}
+@media(max-width:900px){
+ .page-nav .account-session{width:100%;flex:1 1 100%;justify-content:flex-start;margin:8px 0 0}
+ .page-nav #currentAccountEmail{max-width:min(65vw,360px)}
+ .page-nav .account-logout{margin-inline-start:auto}
+}
+@media(max-width:420px){
+ .page-nav .account-session{gap:7px;padding:7px}
+ .page-nav #currentAccountEmail{max-width:170px;font-size:11px}
+ .account-avatar{width:29px;height:29px;flex-basis:29px}
+}
+@media print{.page-nav .account-session{display:none!important}}
 </style><style>
 .brand-header{position:relative;overflow:hidden;isolation:isolate;background:linear-gradient(118deg,#082c32,#0f615c 48%,#17443e 85%,#082c32)!important;background-size:300% 300%!important;animation:brandShift 16s ease infinite;padding:34px 24px 54px!important;clip-path:polygon(0 0,100% 0,100% 94%,82% 100%,54% 95%,26% 100%,0 94%);color:white}
 .brand-header:before,.brand-header:after{content:"";position:absolute;border:1px solid #ffffff2b;border-radius:50%;width:420px;height:420px;pointer-events:none;z-index:-1}.brand-header:before{top:-310px;left:-80px;box-shadow:0 0 0 42px #ffffff08,0 0 0 100px #ffffff05}.brand-header:after{bottom:-350px;right:-80px;box-shadow:0 0 0 55px #ffffff08}
@@ -73,9 +106,10 @@ body[data-active-page="settings"] .site-footer{background:linear-gradient(100deg
 <img src="https://a.top4top.io/p_3942jt4h81.png" alt="شعار أكاديميتي الجديد" referrerpolicy="no-referrer">
 </div></div><div class="brand-copy"><span class="brand-eyebrow">منصة إدارة التدريب الذكية • إصدار 2026</span><h1>نظام إدارة بيانات الدفعات التدريبية</h1><p>رؤية تحليلية متقدمة • استيراد وتحديث دون تكرار • تقارير وقرارات أسرع</p></div></div></header><main>
 <section id="login" class="panel login"><h2>🔐 تسجيل الدخول</h2><input id="email" type="email" placeholder="البريد الإلكتروني"><input id="password" type="password" placeholder="كلمة المرور"><button id="signIn">دخول</button><p id="loginError" class="error"></p></section>
-<section id="app" class="hidden"><nav class="page-nav no-print" aria-label="التنقل بين صفحات النظام"><button type="button" class="active" data-page="dashboard">✦ الرئيسية والمؤشرات</button><button type="button" data-page="records">▦ بيانات المتدربين</button><button type="button" data-page="imports">⇪ استيراد Excel</button><button type="button" data-page="reports">▤ التقارير والطباعة</button><button type="button" data-page="documents">✦ الشهادات والخطابات</button><button type="button" data-page="settings">⚙ معلومات النظام</button><div class="account-session" aria-label="الحساب الحالي">
-<span class="account-session-info"><span class="account-session-caption">الحساب المسجّل</span><strong id="currentAccountEmail" dir="ltr">—</strong><small id="currentAccountRole">—</small></span>
-<button type="button" id="logout" class="account-logout" title="تسجيل الخروج من الحساب الحالي">↪ تسجيل الخروج</button>
+<section id="app" class="hidden"><nav class="page-nav no-print" aria-label="التنقل بين صفحات النظام"><button type="button" class="active" data-page="dashboard">✦ الرئيسية والمؤشرات</button><button type="button" data-page="records">▦ بيانات المتدربين</button><button type="button" data-page="imports">⇪ استيراد Excel</button><button type="button" data-page="reports">▤ التقارير والطباعة</button><button type="button" data-page="documents">✦ الشهادات والخطابات</button><button type="button" data-page="settings">⚙ معلومات النظام</button><div class="account-session" aria-label="معلومات الحساب الحالي">
+<span class="account-avatar" aria-hidden="true">👤</span>
+<span class="account-session-info"><span class="account-session-caption">الحساب الحالي</span><strong id="currentAccountEmail" dir="ltr">—</strong><small id="currentAccountRole" aria-live="polite">—</small></span>
+<button type="button" id="logout" class="account-logout" title="تسجيل الخروج من الحساب الحالي"><span aria-hidden="true">↪</span> تسجيل الخروج</button>
 </div></nav><section class="panel hero page-pane" data-pane="dashboard"><h2>لوحة القيادة الذكية ✨</h2><p>مؤشرات تفاعلية، تحليل شامل للدفعات التدريبية، ورؤية واضحة لكل البيانات.</p></section><section id="importPanel" data-pane="imports" class="panel page-pane" hidden><h2>📤 استيراد وتحديث Excel — المدير فقط</h2><p class="muted">راجعي أسماء الأوراق وعدد السجلات قبل الاعتماد. الهوية الوطنية الموجودة تُحدَّث، والجديدة تُضاف.</p><input id="importFile" type="file" accept=".xlsx"><div class="toolbar" style="margin-top:10px"><button id="previewImport">معاينة الملف</button><button id="confirmImport" disabled>تأكيد الاستيراد والتحديث</button><button id="newOnlyImport" disabled type="button">➕ استيراد البيانات الجديدة فقط</button></div><p id="importStatus" role="status"></p><div id="transferPanel" class="transfer-card" hidden aria-live="polite"><div class="transfer-head"><strong id="transferStage">تجهيز الملف</strong><span id="transferPercent">0%</span></div><div id="transferTrack" class="transfer-track" role="progressbar" aria-label="تقدم رفع ملف Excel" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="transferFill" class="transfer-fill"></div></div><div class="transfer-info"><span id="transferBytes">0 من 0 ميجابايت</span><span id="transferTime">المدة: 00:00</span><span id="transferState">بانتظار البدء</span></div><p class="muted" style="font-size:12px">نسبة التقدم تخص إرسال الملف للخادم. بعد اكتمال الإرسال، يستمر تحليل Excel وحفظ السجلات، ولا تتوفر نسبة دقيقة لتلك المرحلة حتى يدعمها الخادم.</p></div></section>
 <section class="panel page-pane" data-pane="records"><div class="toolbar"><select id="sheet"><option value="">كل الأوراق</option></select><input id="search" type="search" placeholder="ابحثي في جميع الأعمدة"><button id="find">🔎 بحث</button></div><p id="summary" class="stat"></p></section>
 <section class="panel page-pane" data-pane="dashboard"><div class="toolbar"><h2 style="margin-left:auto">📊 لوحة الإحصائيات</h2><label><input type="checkbox" id="selectedOnly"> إحصائيات السجلات المحددة فقط</label><button id="refreshStats">تحديث الإحصائيات</button></div><div id="statsCards" class="cards"></div><div id="statsCharts" class="charts"></div></section>
@@ -124,7 +158,7 @@ $('currentAccountEmail').textContent=session?.user?.email||'غير معروف';
 $('currentAccountRole').textContent=session?'جارٍ التحقق من الصلاحية...':'—';
 if(!session)return;
 try{role=(await json('/me')).role;
-$('currentAccountRole').textContent=role==='admin'?'مدير النظام':role==='viewer'?'مستخدم للعرض فقط':role==='editor'?'محرر':'الصلاحية: '+String(role||'غير محددة');$('importPanel').hidden=role!=='admin';document.querySelector('[data-page=imports]').hidden=role!=='admin';$('add').hidden=role!=='admin';$('deleteSelected').hidden=role!=='admin';$('deleteAll').hidden=role!=='admin';await refresh();await loadDocOverrides();showPage('dashboard')}catch(e){$('message').textContent=e.message}}
+$('currentAccountRole').textContent=role==='admin'?'مدير النظام':role==='viewer'?'مستخدم للعرض فقط':role==='editor'?'محرر':'الصلاحية: '+String(role||'غير محددة');$('importPanel').hidden=role!=='admin';document.querySelector('[data-page=imports]').hidden=role!=='admin';$('add').hidden=role!=='admin';$('deleteSelected').hidden=role!=='admin';$('deleteAll').hidden=role!=='admin';await refresh();await loadDocOverrides();showPage('dashboard')}catch(e){$('message').textContent=e.message;$('currentAccountRole').textContent='تعذّر التحقق من الصلاحية'}}
 async function refresh(){const sheets=await json('/sheets'),old=$('sheet').value;$('sheet').replaceChildren(new Option('كل الأوراق',''),...sheets.map(s=>new Option(`${s.sheet_name} (${s.count})`,s.sheet_name)));$('sheet').value=old;await load()}
 async function load(){try{const q=new URLSearchParams({page,sheet:$('sheet').value,search:$('search').value.trim()});const data=await json('/records?'+q);rows=data.records;total=data.total;$('summary').textContent=`عدد النتائج: ${total.toLocaleString('ar-SA')}`;const thead=$('records').querySelector('thead'),tbody=$('records').querySelector('tbody');thead.replaceChildren();tbody.replaceChildren();const tr=node('tr');for(const h of ['تحديد',...COLS,...(role==='admin'?['إجراء']:[])])tr.append(node('th',h));thead.append(tr);for(const r of rows){const line=node('tr');line.classList.toggle('chosen',selected.has(Number(r.id)));const cell=node('td'),check=document.createElement('input');check.type='checkbox';check.checked=selected.has(Number(r.id));check.onchange=()=>{check.checked?selected.add(Number(r.id)):selected.delete(Number(r.id));line.classList.toggle('chosen',check.checked);updateCount()};cell.append(check);line.append(cell);for(const col of COLS)line.append(node('td',r.payload?.[col]));if(role==='admin'){const c=node('td'),b=node('button','تعديل');b.onclick=()=>openEdit(r);c.append(b);line.append(c)}tbody.append(line)}$('pageText').textContent=`صفحة ${page} من ${Math.max(1,Math.ceil(total/pageSize))}`;$('prev').disabled=page===1;$('next').disabled=page*pageSize>=total;$('message').textContent='';updateCount();await dashboard()}catch(e){$('message').textContent=e.message}}
 function updateCount(){$('selectedCount').textContent=`المحدد: ${selected.size} سجل`;if($('selectedOnly').checked)dashboard().catch(e=>$('message').textContent=e.message)}
