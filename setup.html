@@ -1,1 +1,11 @@
-<!doctype html><html lang="ar" dir="rtl"><meta charset="utf-8"><title>إعداد المدير مغلق</title><body style="font-family:Tahoma,Arial;text-align:center;padding:4rem"><h1>إعداد المدير مغلق</h1><p>أنشئ حساب المدير مسبقًا عبر Supabase. لا يُسمح بإنشاء مدير من صفحة عامة.</p><a href="login.html">العودة إلى تسجيل الدخول</a></body></html>
+<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>إعداد المدير مغلق</title></head><body style="font-family:Tahoma,Arial;text-align:center;padding:4rem"><h1>إعداد المدير مغلق</h1><p>أنشئ حساب المدير مسبقًا عبر Supabase. لا يُسمح بإنشاء مدير من صفحة عامة.</p><a href="login.html">العودة إلى تسجيل الدخول</a><script>
+/* Cosmetic deterrent only. HTML/JS remain accessible to browser users. */
+document.addEventListener('contextmenu',function(event){
+  if(!event.target.closest('input,textarea,[contenteditable="true"]')) event.preventDefault();
+});
+document.addEventListener('keydown',function(event){
+  if((event.ctrlKey||event.metaKey)&&!event.shiftKey&&event.key.toLowerCase()==='u'){
+    event.preventDefault();
+  }
+});
+</script></body></html>
