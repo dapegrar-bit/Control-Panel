@@ -1,0 +1,1 @@
+Replace only index.html in GitHub Pages source with this file. Do not overwrite templates or server.js. Commit, then Fetch origin before Push origin in GitHub Desktop if remote has newer commits. This fixes Arabic batch numbering, search validation, and template reload on trainee selection. No SQL required.

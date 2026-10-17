@@ -185,18 +185,29 @@ async function loadDocOverrides(){try{const r=await json('/documents/positions')
 
 const docNameKey='الاسم الثلاثي ( باللغة العربية )',docBatchKey='الدفعة';
 const docBatchNumbers={'الأولى':1,'الثانية':2,'الثالثة':3,'الرابعة':4,'الخامسة':5,'السادسة':6,'السابعة':7,'الثامنة':8,'التاسعة':9,'العاشرة':10,'الحادية عشرة':11,'الثانية عشرة':12,'الثالثة عشرة':13};
-function docBatchNumber(value){const t=String(value??'').trim().replace(/[٠-٩]/g,d=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/[۰-۹]/g,d=>String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)));const m=t.match(/\d+/);if(m)return Number(m[0]);for(const [word,n] of Object.entries(docBatchNumbers).sort((a,b)=>b[0].length-a[0].length))if(t.includes(word))return n;return null}
+function docBatchNumber(value){
+ const t=String(value??'').normalize('NFKC').trim()
+  .replace(/[٠-٩]/g,d=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+  .replace(/[۰-۹]/g,d=>String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+  .replace(/[\u064B-\u065F\u0670]/g,'')
+  .replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/ة/g,'ه').replace(/\s+/g,' ');
+ const n=t.match(/\d+/);if(n)return Number(n[0]);
+ const names=[['الحاديه عشره',11],['الثانيه عشره',12],['الثالثه عشره',13],['الحاديه عشر',11],['الثانيه عشر',12],['الثالثه عشر',13],['الاولي',1],['الثانيه',2],['الثالثه',3],['الرابعه',4],['الخامسه',5],['السادسه',6],['السابعه',7],['الثامنه',8],['التاسعه',9],['العاشره',10]];
+ for(const [name,id] of names)if(t.includes(name))return id;
+ return null;
+}
 
 const safeHtml=t=>String(t??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const docAssetUrl=path=>new URL(path,location.href).href;
 async function searchDocuments(){
- await refreshDocumentTemplates();
- const q=$('docSearch').value.trim();$('docSearchMsg').textContent='جارٍ البحث...';$('docResults').replaceChildren();
+ const q=$('docSearch').value.trim();
+ if(q.length<2){$('docSearchMsg').textContent='اكتبي حرفين على الأقل للبحث';return;}
+ try{await refreshDocumentTemplates()}catch(e){console.error('فشل تحميل القوالب',e);$('docSearchMsg').textContent='تعذر تحميل القوالب: '+e.message;return;}$('docSearchMsg').textContent='جارٍ البحث...';$('docResults').replaceChildren();
  try{const r=await json('/documents/search?q='+encodeURIComponent(q));$('docSearchMsg').textContent=`تم العثور على ${r.records.length} نتيجة (الحد الأقصى 40)`;
  for(const rec of r.records){const btn=node('button');btn.type='button';btn.className='doc-person';const name=node('strong',rec.payload?.[docNameKey]||'بدون اسم');const meta=node('div',`الدفعة: ${rec.payload?.[docBatchKey]||'—'} | الهوية: ${rec.payload?.['رقم الهوية الوطنية']||'—'} | ${rec.sheet_name}`);meta.className='doc-meta';btn.append(name,meta);btn.onclick=()=>{document.querySelectorAll('.doc-person').forEach(b=>b.classList.remove('chosen'));btn.classList.add('chosen');selectDocPerson(rec)};$('docResults').append(btn)}
  }catch(e){$('docSearchMsg').textContent=e.message}
 }
-async function selectDocPerson(rec){docPerson=rec;const name=String(rec.payload?.[docNameKey]||'');const batch=String(rec.payload?.[docBatchKey]||'').trim();$('docSelected').textContent=`${name} — الدفعة: ${batch} — الحالة: ${rec.payload?.['الحالة']||'—'}`;
+async function selectDocPerson(rec){if(!DOCUMENT_TEMPLATES.length){try{await refreshDocumentTemplates()}catch(e){console.error("تعذر تحميل قوالب المستندات",e);$("docSearchMsg").textContent="تعذر تحميل القوالب من الخادم: "+e.message;}}docPerson=rec;const name=String(rec.payload?.[docNameKey]||'');const batch=String(rec.payload?.[docBatchKey]||'').trim();$('docSelected').textContent=`${name} — الدفعة: ${batch} — الحالة: ${rec.payload?.['الحالة']||'—'}`;
  // عرض القوالب الأصلية المطابقة لدفعة المتدرب فقط؛ لا خطابات عامة أو بديلة.
  const batchId=docBatchNumber(batch);
  const matches=DOCUMENT_TEMPLATES.filter(t=>batchId!==null&&t.batch!=='جميع الدفعات'&&docBatchNumber(t.batch)===batchId);
