@@ -78,6 +78,13 @@ async function guard(req, res, next) {
     next();
   } catch (error) { next(error); }
 }
+// Prevent browsers and shared proxies from caching authenticated API responses.
+app.use('/api', (_req, res, next) => {
+  res.set('Cache-Control', 'private, no-store, max-age=0');
+  res.set('Pragma', 'no-cache');
+  res.set('X-Content-Type-Options', 'nosniff');
+  next();
+});
 app.use('/api', guard);
 app.get('/api/db-health', async (_req, res, next) => {
   try { await db.query('SELECT 1'); res.json({ status: 'ok', database: 'connected' }); }
@@ -687,14 +694,14 @@ app.post('/api/documents/issue',async(req,res,next)=>{
     const id=Number(req.body?.recordId),templateId=String(req.body?.templateId||'');
     if(!Number.isSafeInteger(id)||id<1)return res.status(400).json({error:'معرف المتدرب غير صحيح'});
     const template=(await allDocumentTemplates()).find(t=>t.id===templateId);
-    if(!template)return res.status(400).json({error:'القالب غير مسجل في قاعدة بيانات القوالب'});
+    if(!template)return res.status(400).json({error:'القالب غير مسجل في document-templates.js'});
     const r=await db.query('SELECT id,payload FROM public.trainee_records WHERE id=$1',[id]);
     if(!r.rowCount)return res.status(404).json({error:'المتدرب غير موجود'});
     const data=r.rows[0].payload||{};
     const batch=String(data[docFields.batch]??'').trim();
     const name=String(data[docFields.name]??'').trim();
     if(!name)return res.status(400).json({error:'اسم المتدرب غير موجود'});
-    if(template.batch!=='جميع الدفعات' && (!batchNumber(batch)||batchNumber(batch)!==batchNumber(template.batch)))return res.status(409).json({error:'قالب المستند لا يطابق دفعة المتدرب'});
+    if(!batchNumber(batch)||batchNumber(batch)!==batchNumber(template.batch))return res.status(409).json({error:'قالب المستند لا يطابق دفعة المتدرب'});
     const out=await db.query(`INSERT INTO public.trainee_document_issues
       (trainee_record_id,template_id,document_kind,document_type,batch_name,trainee_name,issued_by,issuer_email,issuer_role,action)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'prepared_for_print') RETURNING id,created_at`,
