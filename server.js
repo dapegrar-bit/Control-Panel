@@ -538,6 +538,100 @@ app.post('/api/import/new-only', adminOnly, receiveExcel, async (req, res, next)
   }
 });
 
+
+// Import jobs: the browser receives a job ID immediately and polls real server-side counters.
+// Jobs live in process memory: run Render with one instance, or use a persistent job store for scaling.
+const importJobs = new Map();
+function publicJob(job) {
+  const { state, phase, total, processed, added, updated, unchanged, skipped, error, startedAt, endedAt, sheets } = job;
+  return { state, phase, total, processed, added, updated, unchanged, skipped, error,
+    startedAt, endedAt, sheets, committed: state === 'completed' };
+}
+app.get('/api/import/jobs/:id', adminOnly, (req,res) => {
+  const job=importJobs.get(req.params.id);
+  if (!job || job.userId !== req.userId) return res.sendStatus(404);
+  res.set('Cache-Control','no-store').json(publicJob(job));
+});
+app.post('/api/import/start/:mode', adminOnly, receiveExcel, async (req,res,next) => {
+  if (!req.file) return next(importError('اختاري ملف Excel'));
+  if (!['new-only','update'].includes(req.params.mode)) { await cleanTemp(req.file);return next(importError('نوع الاستيراد غير صالح')); }
+  const id=randomUUID();
+  const job={ userId:req.userId, state:'running', phase:'فحص الملف', total:0, processed:0,
+    added:0, updated:0, unchanged:0, skipped:0, error:null, sheets:[], startedAt:Date.now(), endedAt:null };
+  importJobs.set(id,job);
+  res.status(202).json({jobId:id});
+  // Start after responding so progress polling works during long imports.
+  setImmediate(async () => {
+    let client;
+    try {
+      job.phase='فحص الصفوف وحساب الإجمالي';
+      const preview=await parseWorkbookFile(req.file.path);
+      job.total=preview.total;job.sheets=preview.sheets;
+      job.phase='مقارنة السجلات وحفظ التغييرات';
+      client=await db.connect();await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(84621831)');
+      const index=await identityIndex(client);
+      const rowNumberEnabled=await hasRowNumberColumn(client);
+      const seenNoId=new Set();
+      const pending=[];
+      async function flushPending(){
+        if(!pending.length)return;
+        const args=[];
+        const values=pending.map((r,i)=>{args.push(r.sheet,JSON.stringify(r.payload));return `($${i*2+1},$${i*2+2}::jsonb)`}).join(',');
+        await client.query(`INSERT INTO public.trainee_records(sheet_name,payload) VALUES ${values}`,args);
+        pending.length=0;
+      }
+      await parseWorkbookFile(req.file.path,async record=>{
+        if(req.params.mode==='update'){
+          const result=await upsertRecord(client,record.sheet,record.payload,index,rowNumberEnabled);
+          if(result==='added')job.added++;
+          else if(result==='updated')job.updated++;
+          else job.unchanged++;
+        }else{
+          const nationalId=identity(record.payload);
+          if(nationalId && index.has(nationalId)){
+            if(index.get(nationalId)===null)throw importError(`الهوية ${nationalId} مكررة في قاعدة البيانات وتحتاج مراجعة`);
+            job.skipped++;
+          }else{
+            const signature=JSON.stringify([record.sheet,record.payload]);
+            if(!nationalId && seenNoId.has(signature))job.skipped++;
+            else{
+              if(!nationalId)seenNoId.add(signature);
+              const duplicate=!nationalId && (await client.query(
+                'SELECT 1 FROM public.trainee_records WHERE sheet_name=$1 AND payload=$2::jsonb LIMIT 1',
+                [record.sheet,JSON.stringify(record.payload)])).rowCount>0;
+              if(duplicate)job.skipped++;
+              else{
+                if(rowNumberEnabled){
+                  const inserted=await insertOne(client,record.sheet,record.payload,rowNumberEnabled);
+                  if(nationalId)index.set(nationalId,inserted.rows[0].id);
+                }else{
+                  pending.push(record);
+                  if(nationalId)index.set(nationalId,-1);
+                  if(pending.length>=200)await flushPending();
+                }
+                job.added++;
+              }
+            }
+          }
+        }
+        job.processed++;
+      });
+      if(req.params.mode==='new-only')await flushPending();
+      job.phase='اعتماد التغييرات في قاعدة البيانات';
+      await client.query('COMMIT');
+      job.state='completed';job.phase='اكتمل الحفظ';job.endedAt=Date.now();
+    }catch(error){
+      if(client)await client.query('ROLLBACK').catch(()=>{});
+      job.state='failed';job.error=error.status===400?error.message:'تعذر الاستيراد؛ لم تُعتمد التغييرات. راجعي سجل Render.';
+      job.phase='فشل الاستيراد';job.endedAt=Date.now();
+      console.error('Import job failed:',{id,code:error.code,message:error.message});
+    }finally{client?.release();await cleanTemp(req.file);}
+  });
+});
+// Prevent memory growth; active jobs are never evicted.
+setInterval(()=>{for(const [id,job] of importJobs){if(job.endedAt && Date.now()-job.endedAt>60*60*1000)importJobs.delete(id)}},15*60*1000).unref();
+
 app.use((error, req, res, _next) => {
   if (res.headersSent) return;
   if (error instanceof multer.MulterError) {
