@@ -1,4 +1,3 @@
-
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -6,497 +5,180 @@ import rateLimit from 'express-rate-limit';
 import pg from 'pg';
 import ExcelJS from 'exceljs';
 import multer from 'multer';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { createReadStream } from 'node:fs';
+import { unlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createClient } from '@supabase/supabase-js';
 
-// ========================================
-// 1. إعداد التطبيق
-// ========================================
-
 const app = express();
-
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
-
 const PORT = Number(process.env.PORT) || 3000;
-
-// ========================================
-// 2. التحقق من متغيرات البيئة
-// ========================================
-
-const requiredVariables = [
-  'DATABASE_URL',
-  'SUPABASE_URL',
-  'SUPABASE_ANON_KEY',
-  'ALLOWED_ORIGIN'
-];
-
-for (const name of requiredVariables) {
-  if (!process.env[name]?.trim()) {
-    throw new Error(`Missing environment variable: ${name}`);
-  }
+for (const name of ['DATABASE_URL', 'SUPABASE_URL', 'SUPABASE_ANON_KEY', 'ALLOWED_ORIGIN']) {
+  if (!process.env[name]?.trim()) throw new Error(`Missing environment variable: ${name}`);
 }
 
-// ========================================
-// 3. إعداد الاتصال بقاعدة بيانات Supabase
-// ========================================
-
-const databaseUrl = process.env.DATABASE_URL.trim();
-
-let parsedDatabaseUrl;
-
+let databaseUrl;
 try {
-  parsedDatabaseUrl = new URL(databaseUrl);
-
-  if (
-    !['postgresql:', 'postgres:'].includes(
-      parsedDatabaseUrl.protocol
-    )
-  ) {
-    throw new Error('Invalid database protocol');
-  }
-
-  if (
-    !parsedDatabaseUrl.hostname ||
-    !parsedDatabaseUrl.username ||
-    !parsedDatabaseUrl.password
-  ) {
-    throw new Error('Incomplete database connection string');
+  databaseUrl = new URL(process.env.DATABASE_URL.trim());
+  if (!['postgresql:', 'postgres:'].includes(databaseUrl.protocol) ||
+      !databaseUrl.hostname || !databaseUrl.username || !databaseUrl.password) {
+    throw new Error('Incomplete connection string');
   }
 } catch {
-  throw new Error(
-    'DATABASE_URL must be a complete PostgreSQL connection URL'
-  );
+  throw new Error('DATABASE_URL must be a complete PostgreSQL connection URL');
 }
-
-// منع تعارض معاملات SSL في الرابط مع إعدادات pg.
-// إعداد SSL يُدار أدناه فقط.
-for (const key of [
-  'sslmode',
-  'sslcert',
-  'sslkey',
-  'sslrootcert'
-]) {
-  parsedDatabaseUrl.searchParams.delete(key);
+for (const key of ['sslmode', 'sslcert', 'sslkey', 'sslrootcert']) databaseUrl.searchParams.delete(key);
+const databaseCa = process.env.DATABASE_CA_CERT?.replace(/\\n/g, '\n').trim();
+if (databaseCa && !databaseCa.includes('-----BEGIN CERTIFICATE-----')) {
+  throw new Error('DATABASE_CA_CERT must contain a PEM certificate');
 }
-
-// شهادة CA اختيارية، لكنها قد تكون ضرورية
-// لحل SELF_SIGNED_CERT_IN_CHAIN.
-const databaseCa = process.env.DATABASE_CA_CERT
-  ?.replace(/\\n/g, '\n')
-  .trim();
-
-if (
-  databaseCa &&
-  !databaseCa.includes('-----BEGIN CERTIFICATE-----')
-) {
-  throw new Error(
-    'DATABASE_CA_CERT must contain a PEM certificate'
-  );
-}
-
 const db = new pg.Pool({
-  connectionString: parsedDatabaseUrl.toString(),
-
-  ssl: databaseCa
-    ? {
-        ca: databaseCa,
-        rejectUnauthorized: true
-      }
-    : {
-        rejectUnauthorized: true
-      },
-
+  connectionString: databaseUrl.toString(),
+  ssl: databaseCa ? { ca: databaseCa, rejectUnauthorized: true } : { rejectUnauthorized: true },
   max: 5,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000
 });
-
-db.on('error', (error) => {
-  console.error('Database pool error:', {
-    code: error.code,
-    message: error.message
-  });
+db.on('error', error => console.error('Database pool error:', { code: error.code, message: error.message }));
+const auth = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY, {
+  auth: { persistSession: false, autoRefreshToken: false }
 });
-
-// ========================================
-// 4. إعداد Supabase Authentication
-// ========================================
-
-const auth = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY,
-  {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false
-    }
-  }
-);
-
-// ========================================
-// 5. إعداد الحماية و CORS
-// ========================================
 
 app.use(helmet());
-
-const allowedOrigins = process.env.ALLOWED_ORIGIN
-  .split(',')
-  .map(origin => origin.trim().replace(/\/$/, ''))
-  .filter(Boolean);
-
-app.use(
-  cors({
-    origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-
-      return callback(new Error('Origin not allowed'));
-    },
-
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-  })
-);
-
+const allowedOrigins = process.env.ALLOWED_ORIGIN.split(',')
+  .map(origin => origin.trim().replace(/\/$/, '')).filter(Boolean);
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    callback(new Error('Origin not allowed'));
+  },
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json({ limit: '16kb' }));
+app.use(rateLimit({ windowMs: 60_000, limit: 80, standardHeaders: 'draft-7', legacyHeaders: false }));
 
-app.use(
-  rateLimit({
-    windowMs: 60 * 1000,
-    limit: 80,
-    standardHeaders: 'draft-7',
-    legacyHeaders: false
-  })
-);
-
-// ========================================
-// 6. فحص تشغيل الخادم
-// ========================================
-
-app.get('/health', (_req, res) => {
-  res.json({
-    status: 'ok',
-    service: 'Trainees Management System'
-  });
-});
-
-// فحص قاعدة البيانات دون كشف معلومات حساسة.
-// هذا المسار محمي بتسجيل الدخول.
-app.get('/api/db-health', guard, async (_req, res, next) => {
-  try {
-    await db.query('SELECT 1');
-
-    res.json({
-      status: 'ok',
-      database: 'connected'
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// ========================================
-// 7. التحقق من المستخدم وصلاحياته
-// ========================================
+app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'Trainees Management System' }));
 
 async function guard(req, res, next) {
   try {
-    const token = (
-      req.headers.authorization || ''
-    ).match(/^Bearer (.+)$/)?.[1];
-
-    if (!token) {
-      return res.sendStatus(401);
-    }
-
+    const token = (req.headers.authorization || '').match(/^Bearer (.+)$/)?.[1];
+    if (!token) return res.sendStatus(401);
     const { data, error } = await auth.auth.getUser(token);
-
-    if (error || !data.user) {
-      return res.sendStatus(401);
-    }
-
-    const result = await db.query(
-      `
-      SELECT role
-      FROM app_private.user_roles
-      WHERE user_id = $1
-      `,
-      [data.user.id]
-    );
-
-    if (!result.rows.length) {
-      return res.sendStatus(403);
-    }
-
+    if (error || !data.user) return res.sendStatus(401);
+    const result = await db.query('SELECT role FROM app_private.user_roles WHERE user_id = $1', [data.user.id]);
+    if (!result.rows.length) return res.sendStatus(403);
     req.userId = data.user.id;
     req.role = result.rows[0].role;
-
     next();
-  } catch (error) {
-    next(error);
-  }
+  } catch (error) { next(error); }
 }
-
 app.use('/api', guard);
-app.get('/api/me', (req,res)=>res.json({role:req.role}));
-
-// ========================================
-// 8. جلب أسماء الأوراق وأعداد السجلات
-// ========================================
-
+app.get('/api/db-health', async (_req, res, next) => {
+  try { await db.query('SELECT 1'); res.json({ status: 'ok', database: 'connected' }); }
+  catch (error) { next(error); }
+});
+app.get('/api/me', (req, res) => res.json({ role: req.role }));
 app.get('/api/sheets', async (_req, res, next) => {
   try {
-    const result = await db.query(
-      `
-      SELECT
-        sheet_name,
-        COUNT(*)::int AS count
-      FROM public.trainee_records
-      GROUP BY sheet_name
-      ORDER BY sheet_name
-      `
-    );
-
+    const result = await db.query('SELECT sheet_name, COUNT(*)::int AS count FROM public.trainee_records GROUP BY sheet_name ORDER BY sheet_name');
     res.json(result.rows);
-  } catch (error) {
-    next(error);
-  }
+  } catch (error) { next(error); }
 });
-
-// ========================================
-// 9. إعداد البحث والتصفية
-// ========================================
-
 function filters(query) {
-  const where = [];
-  const args = [];
-
+  const where = [], args = [];
   if (query.sheet) {
     args.push(String(query.sheet).slice(0, 200));
-
-    where.push(
-      `sheet_name = $${args.length}`
-    );
+    where.push(`sheet_name = $${args.length}`);
   }
-
   if (query.search) {
-    args.push(
-      '%' +
-      String(query.search).slice(0, 150) +
-      '%'
-    );
-
-    where.push(
-      `payload::text ILIKE $${args.length}`
-    );
+    args.push('%' + String(query.search).slice(0, 150) + '%');
+    where.push(`payload::text ILIKE $${args.length}`);
   }
-
-  return {
-    sql: where.length
-      ? 'WHERE ' + where.join(' AND ')
-      : '',
-    args
-  };
+  return { sql: where.length ? 'WHERE ' + where.join(' AND ') : '', args };
 }
-
-// ========================================
-// 10. جلب السجلات مع ترقيم الصفحات
-// ========================================
-
 app.get('/api/records', async (req, res, next) => {
   try {
     const f = filters(req.query);
-
-    const page = Math.max(
-      1,
-      Math.min(
-        100000,
-        Number.parseInt(req.query.page, 10) || 1
-      )
-    );
-
-    const limit = 50;
-    const offset = (page - 1) * limit;
-
-    const countResult = await db.query(
-      `
-      SELECT COUNT(*)::int AS n
-      FROM public.trainee_records
-      ${f.sql}
-      `,
-      f.args
-    );
-
+    const page = Math.max(1, Math.min(100000, Number.parseInt(req.query.page, 10) || 1));
+    const limit = 50, offset = (page - 1) * limit;
+    const countResult = await db.query(`SELECT COUNT(*)::int AS n FROM public.trainee_records ${f.sql}`, f.args);
     const recordsResult = await db.query(
-      `
-      SELECT
-        id,
-        sheet_name,
-        payload
-      FROM public.trainee_records
-      ${f.sql}
-      ORDER BY id
-      LIMIT ${limit}
-      OFFSET $${f.args.length + 1}
-      `,
+      `SELECT id, sheet_name, payload FROM public.trainee_records ${f.sql} ORDER BY id LIMIT ${limit} OFFSET $${f.args.length + 1}`,
       [...f.args, offset]
     );
-
-    res.json({
-      total: countResult.rows[0].n,
-      records: recordsResult.rows,
-      page,
-      pageSize: limit
-    });
-  } catch (error) {
-    next(error);
-  }
+    res.json({ total: countResult.rows[0].n, records: recordsResult.rows, page, pageSize: limit });
+  } catch (error) { next(error); }
 });
-
-// ========================================
-// 11. تصدير السجلات المحددة إلى Excel
-// ========================================
-
+function safeExcelValue(value) {
+  if (value === null || value === undefined) return '';
+  const text = String(value);
+  return /^[\s]*[=+\-@]/.test(text) ? "'" + text : text;
+}
 app.post('/api/export', async (req, res, next) => {
   try {
-    if (!['admin', 'exporter'].includes(req.role)) {
-      return res.sendStatus(403);
-    }
-
+    if (!['admin', 'exporter'].includes(req.role)) return res.sendStatus(403);
     const ids = Array.isArray(req.body?.ids)
-      ? req.body.ids
-          .filter(
-            id =>
-              Number.isSafeInteger(id) &&
-              id > 0
-          )
-          .slice(0, 1000)
-      : [];
-
-    if (!ids.length) {
-      return res.status(400).json({
-        error: 'حددي سجلات للتصدير، بحد أقصى 1000 سجل'
-      });
-    }
-
-    const result = await db.query(
-      `
-      SELECT
-        sheet_name,
-        payload
-      FROM public.trainee_records
-      WHERE id = ANY($1::bigint[])
-      ORDER BY id
-      `,
-      [ids]
-    );
-
+      ? req.body.ids.filter(id => Number.isSafeInteger(id) && id > 0).slice(0, 1000) : [];
+    if (!ids.length) return res.status(400).json({ error: 'حددي سجلات للتصدير، بحد أقصى 1000 سجل' });
+    const result = await db.query('SELECT sheet_name, payload FROM public.trainee_records WHERE id = ANY($1::bigint[]) ORDER BY id', [ids]);
     const workbook = new ExcelJS.Workbook();
-
-    const worksheet = workbook.addWorksheet(
-      'البيانات المحددة'
-    );
-
-    worksheet.views = [
-      { rightToLeft: true }
-    ];
-
-    const keys = [
-      ...new Set(
-        result.rows.flatMap(
-          row => Object.keys(row.payload || {})
-        )
-      )
-    ];
-
-    worksheet.addRow([
-      'الورقة',
-      ...keys
+    const worksheet = workbook.addWorksheet('البيانات المحددة');
+    worksheet.views = [{ rightToLeft: true }];
+    const keys = [...new Set(result.rows.flatMap(row => Object.keys(row.payload || {})))];
+    worksheet.addRow(['الورقة', ...keys]);
+    for (const row of result.rows) worksheet.addRow([
+      safeExcelValue(row.sheet_name), ...keys.map(key => safeExcelValue(row.payload?.[key]))
     ]);
-
-    function safeExcelValue(value) {
-      if (value === null || value === undefined) {
-        return '';
-      }
-
-      const text = String(value);
-
-      // حماية من تنفيذ الصيغ غير الموثوقة.
-      if (/^[\s]*[=+\-@]/.test(text)) {
-        return "'" + text;
-      }
-
-      return text;
-    }
-
-    for (const row of result.rows) {
-      worksheet.addRow([
-        safeExcelValue(row.sheet_name),
-
-        ...keys.map(key =>
-          safeExcelValue(row.payload?.[key])
-        )
-      ]);
-    }
-
-    worksheet.getRow(1).font = {
-      bold: true,
-      color: { argb: 'FFFFFFFF' }
-    };
-
-    worksheet.getRow(1).fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FF205D50' }
-    };
-
-    worksheet.columns.forEach(column => {
-      column.width = 25;
-    });
-
-    res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    );
-
-    res.setHeader(
-      'Content-Disposition',
-      'attachment; filename="selected.xlsx"'
-    );
-
-    res.setHeader(
-      'Cache-Control',
-      'no-store'
-    );
-
+    worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF205D50' } };
+    worksheet.columns.forEach(column => { column.width = 25; });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="selected.xlsx"');
+    res.setHeader('Cache-Control', 'no-store');
     await workbook.xlsx.write(res);
-
     res.end();
-  } catch (error) {
-    next(error);
-  }
+  } catch (error) { next(error); }
 });
 
-
-// ========================================
-// استيراد Excel للمدير فقط
-// ========================================
+// Upload directly to a temporary file: no file-size-sized Buffer retained in Node's heap.
+const MAX_FILE_BYTES = 35 * 1024 * 1024;
+const MAX_RECORDS = 80_000;
+const BATCH_SIZE = 75;
 const excelUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 35 * 1024 * 1024, files: 1 },
+  storage: multer.diskStorage({
+    destination: (_req, _file, callback) => callback(null, tmpdir()),
+    filename: (_req, _file, callback) => callback(null, `trainee-${randomUUID()}.xlsx`)
+  }),
+  limits: { fileSize: MAX_FILE_BYTES, files: 1 },
   fileFilter(_req, file, callback) {
     const ok = /\.xlsx$/i.test(file.originalname);
     callback(ok ? null : new Error('يُسمح بملفات XLSX فقط'), ok);
   }
 });
-
 function adminOnly(req, res, next) {
   if (req.role !== 'admin') return res.sendStatus(403);
   next();
 }
-
+async function cleanTemp(file) {
+  if (file?.path) {
+    try { await unlink(file.path); }
+    catch (error) { if (error.code !== 'ENOENT') console.error('Temp cleanup error:', error.message); }
+  }
+}
+// Multer can leave a partially written temp file after rejecting a request.
+function receiveExcel(req, res, next) {
+  excelUpload.single('file')(req, res, async error => {
+    if (error) {
+      await cleanTemp(req.file);
+      return next(error);
+    }
+    next();
+  });
+}
 function excelValue(cell) {
   const value = cell.value;
   if (value === null || value === undefined) return null;
@@ -504,134 +186,165 @@ function excelValue(cell) {
   if (typeof value === 'object') {
     if (value.result !== undefined) return value.result;
     if (value.text !== undefined) return value.text;
-    if (value.richText) return value.richText.map(x => x.text).join('');
+    if (value.richText) return value.richText.map(item => item.text).join('');
     if (value.hyperlink) return value.text || value.hyperlink;
     return cell.text || null;
   }
   return value;
 }
+function importError(message) {
+  const error = new Error(message);
+  error.status = 400;
+  return error;
+}
+async function fileHash(path) {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest('hex');
+}
 
-async function parseWorkbook(buffer, includeRecords) {
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer);
+/** Read one worksheet row at a time. Never accumulate whole-workbook records. */
+async function parseWorkbookFile(path, onRecord = null) {
+  const reader = new ExcelJS.stream.xlsx.WorkbookReader(path, {
+    entries: 'emit', worksheets: 'emit', sharedStrings: 'cache',
+    hyperlinks: 'ignore', styles: 'ignore'
+  });
   const sheets = [];
-  const records = [];
-  for (const sheet of workbook.worksheets) {
-    const header = sheet.getRow(1);
-    const lastColumn = header.cellCount;
-    if (!lastColumn) continue;
-    const headers = [];
-    const used = new Set();
-    for (let i = 1; i <= lastColumn; i++) {
-      const base = String(excelValue(header.getCell(i)) ?? `عمود ${i}`).trim() || `عمود ${i}`;
-      let name = base, suffix = 2;
-      while (used.has(name)) name = `${base} (${suffix++})`;
-      used.add(name);
-      headers.push(name);
-    }
+  let total = 0;
+  for await (const sheet of reader) {
+    let headers = null;
     let count = 0;
-    sheet.eachRow((row, rowNumber) => {
-      if (rowNumber === 1) return;
+    for await (const row of sheet) {
+      if (row.number === 1) {
+        const lastColumn = row.cellCount;
+        if (!lastColumn) continue;
+        headers = [];
+        const used = new Set();
+        for (let i = 1; i <= lastColumn; i++) {
+          const base = String(excelValue(row.getCell(i)) ?? `عمود ${i}`).trim() || `عمود ${i}`;
+          let name = base, suffix = 2;
+          while (used.has(name)) name = `${base} (${suffix++})`;
+          used.add(name);
+          headers.push(name);
+        }
+        continue;
+      }
+      if (!headers) continue;
       const payload = {};
       let nonempty = false;
-      for (let i = 1; i <= lastColumn; i++) {
+      for (let i = 1; i <= headers.length; i++) {
         const value = excelValue(row.getCell(i));
         payload[headers[i - 1]] = value;
         if (value !== null && value !== '') nonempty = true;
       }
-      if (!nonempty) return;
+      if (!nonempty) continue;
+      total++;
+      if (total > MAX_RECORDS) throw importError('الحد الأقصى 80000 سجل في الملف الواحد');
       count++;
-      if (includeRecords) records.push({ sheet: sheet.name, payload });
-    });
-    sheets.push({ name: sheet.name, count, columns: headers.length });
+      if (onRecord) await onRecord({ sheet: sheet.name, rowNumber: row.number, payload });
+    }
+    if (headers) sheets.push({ name: sheet.name, count, columns: headers.length });
   }
-  if (!sheets.length) throw new Error('لم يُعثر على أوراق تحتوي على عناوين أعمدة');
-  if (sheets.reduce((sum, s) => sum + s.count, 0) > 80000) {
-    throw new Error('الحد الأقصى 80000 سجل في الملف الواحد');
-  }
-  return { sheets, records };
+  if (!sheets.length) throw importError('لم يُعثر على أوراق تحتوي على عناوين أعمدة');
+  return { sheets, total };
 }
 
-app.post('/api/import/preview', adminOnly, excelUpload.single('file'), async (req, res, next) => {
+// Batch inserts and adapt to either existing DB schema: with/without row_number.
+async function hasRowNumberColumn(client) {
+  const result = await client.query(`
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='trainee_records' AND column_name='row_number'
+  `);
+  return result.rowCount > 0;
+}
+async function insertBatch(client, batch, rowNumberEnabled, sheetOffsets) {
+  if (!batch.length) return;
+  const args = [];
+  const placeholders = batch.map((record, i) => {
+    if (rowNumberEnabled) {
+      const index = (sheetOffsets.get(record.sheet) || 0) + 1;
+      sheetOffsets.set(record.sheet, index);
+      args.push(record.sheet, index, JSON.stringify(record.payload));
+      return `($${3*i+1},$${3*i+2},$${3*i+3}::jsonb)`;
+    }
+    args.push(record.sheet, JSON.stringify(record.payload));
+    return `($${2*i+1},$${2*i+2}::jsonb)`;
+  });
+  const columns = rowNumberEnabled ? '(sheet_name,row_number,payload)' : '(sheet_name,payload)';
+  await client.query(`INSERT INTO public.trainee_records ${columns} VALUES ${placeholders.join(',')}`, args);
+}
+
+app.post('/api/import/preview', adminOnly, receiveExcel, async (req, res, next) => {
   try {
-    if (!req.file) return res.status(400).json({ error: 'اختاري ملف Excel' });
-    const parsed = await parseWorkbook(req.file.buffer, false);
-    res.json({ sheets: parsed.sheets, total: parsed.sheets.reduce((n, s) => n + s.count, 0) });
+    if (!req.file) throw importError('اختاري ملف Excel');
+    const result = await parseWorkbookFile(req.file.path);
+    res.json(result);
   } catch (error) { next(error); }
+  finally { await cleanTemp(req.file); }
 });
 
-app.post('/api/import/upload', adminOnly, excelUpload.single('file'), async (req, res, next) => {
-  let client;
+app.post('/api/import/upload', adminOnly, receiveExcel, async (req, res, next) => {
+  let client = null;
+  let committed = false;
   try {
-    if (!req.file) return res.status(400).json({ error: 'اختاري ملف Excel' });
-    const hash = createHash('sha256').update(req.file.buffer).digest('hex');
-    const parsed = await parseWorkbook(req.file.buffer, true);
+    if (!req.file) throw importError('اختاري ملف Excel');
+    const hash = await fileHash(req.file.path);
     client = await db.connect();
     await client.query('BEGIN');
-    // يمنع تزامن عمليتي رفع داخل النظام نفسه.
     await client.query('SELECT pg_advisory_xact_lock(84621831)');
     const existing = await client.query('SELECT 1 FROM public.trainee_imports WHERE file_hash=$1', [hash]);
     if (existing.rowCount) {
-      await client.query('ROLLBACK');
-      client.release(); client = null;
-      return res.status(409).json({ error: 'تم استيراد هذا الملف سابقًا، ولن نكرر بياناته' });
+      const error = new Error('تم استيراد هذا الملف سابقًا، ولن نكرر بياناته');
+      error.status = 409;
+      throw error;
     }
-    for (let offset = 0; offset < parsed.records.length; offset += 150) {
-      const batch = parsed.records.slice(offset, offset + 150);
-      const args = [];
-      const placeholders = batch.map((record, i) => {
-        args.push(record.sheet, JSON.stringify(record.payload));
-        return `($${2*i+1},$${2*i+2}::jsonb)`;
-      });
-      await client.query(`INSERT INTO public.trainee_records (sheet_name,payload) VALUES ${placeholders.join(',')}`, args);
+    const rowNumberEnabled = await hasRowNumberColumn(client);
+    const sheetOffsets = new Map();
+    if (rowNumberEnabled) {
+      const positions = await client.query(`
+        SELECT sheet_name, COALESCE(MAX(row_number),0)::int AS last_number
+        FROM public.trainee_records GROUP BY sheet_name
+      `);
+      for (const position of positions.rows) sheetOffsets.set(position.sheet_name, position.last_number);
     }
-    await client.query('INSERT INTO public.trainee_imports(file_hash,file_name,row_count) VALUES ($1,$2,$3)', [hash, req.file.originalname, parsed.records.length]);
+    let batch = [];
+    const parsed = await parseWorkbookFile(req.file.path, async record => {
+      batch.push(record);
+      if (batch.length >= BATCH_SIZE) {
+        await insertBatch(client, batch, rowNumberEnabled, sheetOffsets);
+        batch = [];
+      }
+    });
+    await insertBatch(client, batch, rowNumberEnabled, sheetOffsets);
+    await client.query(
+      'INSERT INTO public.trainee_imports(file_hash,file_name,row_count) VALUES ($1,$2,$3)',
+      [hash, req.file.originalname, parsed.total]
+    );
     await client.query('COMMIT');
-    client.release(); client = null;
-    res.json({ imported: parsed.records.length, sheets: parsed.sheets });
+    committed = true;
+    res.json({ imported: parsed.total, sheets: parsed.sheets });
   } catch (error) {
-    if (client) { try { await client.query('ROLLBACK'); } catch {} client.release(); }
+    if (client && !committed) {
+      try { await client.query('ROLLBACK'); } catch (rollbackError) {
+        console.error('Import rollback failed:', rollbackError.message);
+      }
+    }
     next(error);
+  } finally {
+    if (client) client.release();
+    await cleanTemp(req.file);
   }
 });
-
-// ========================================
-// 12. معالجة الأخطاء
-// ========================================
 
 app.use((error, req, res, _next) => {
-  if (error instanceof multer.MulterError) return res.status(400).json({ error: 'حجم الملف كبير أو نوع الرفع غير صالح (الحد 35MB)' });
-  if (error.message?.includes('XLSX') || error.message?.includes('80000') || error.message?.includes('عناوين أعمدة')) return res.status(400).json({ error: error.message });
-  console.error('Server error:', {
-    code: error.code || 'UNKNOWN',
-    message: error.message,
-    path: req.path
-  });
-
-  if (res.headersSent) {
-    return;
+  if (res.headersSent) return;
+  if (error instanceof multer.MulterError) {
+    return res.status(400).json({ error: 'حجم الملف كبير أو نوع الرفع غير صالح (الحد 35MB)' });
   }
-
-  res.status(500).json({
-    error: 'حدث خطأ في الخادم'
-  });
+  if (error.status === 400 || error.status === 409 || error.message?.includes('XLSX')) {
+    return res.status(error.status || 400).json({ error: error.message });
+  }
+  console.error('Server error:', { code: error.code || 'UNKNOWN', message: error.message, path: req.path });
+  res.status(500).json({ error: 'حدث خطأ في الخادم' });
 });
-
-// ========================================
-// 13. تشغيل الخادم
-// ========================================
-
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(
-    `Trainees Management API running on port ${PORT}`
-  );
-});
-
-// ========================================
-// ملاحظات أمنية
-// ========================================
-
-// حسابات المدير والصلاحيات تُدار داخل Supabase.
-// إنشاء حساب المدير من الواجهة العامة معطل.
-// لا تضع كلمات المرور أو مفاتيح service_role هنا.
-// لا تعطل التحقق من شهادة SSL.
+app.listen(PORT, '0.0.0.0', () => console.log(`Trainees Management API running on port ${PORT}`));
