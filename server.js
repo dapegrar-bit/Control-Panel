@@ -128,11 +128,11 @@ app.post('/api/export', async (req, res, next) => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('البيانات المحددة');
     worksheet.views = [{ rightToLeft: true }];
-    const keys = [...new Set(result.rows.flatMap(row => Object.keys(row.payload || {})))];
-    worksheet.addRow(['الورقة', ...keys]);
-    for (const row of result.rows) worksheet.addRow([
-      safeExcelValue(row.sheet_name), ...keys.map(key => safeExcelValue(row.payload?.[key]))
-    ]);
+    const keys = TRAINEE_COLUMNS;
+    worksheet.addRow([...keys]);
+    for (const row of result.rows) worksheet.addRow(
+      keys.map(key => safeExcelValue(row.payload?.[key]))
+    );
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
     worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF205D50' } };
     worksheet.columns.forEach(column => { column.width = 25; });
@@ -143,6 +143,31 @@ app.post('/api/export', async (req, res, next) => {
     res.end();
   } catch (error) { next(error); }
 });
+
+// أسماء الحقول الرسمية وبترتيب الأعمدة الأصلي (يُحافظ على المسافات في النص).
+const TRAINEE_COLUMNS = Object.freeze([
+  'الجنس',
+  'المنطقة',
+  'المؤهل الدراسي',
+  'اسم جامعة او الكلية ( سواء كنت طالب فيها او خريج منها )',
+  'الدفعة',
+  'العام',
+  'الحالة',
+  'الاسم الثلاثي ( باللغة العربية )',
+  'الايميل',
+  'رقم الجوال',
+  'رقم الهوية الوطنية',
+  'مقرر المحاسبة',
+  'مقرر مهارات التواصل',
+  'مقرر  الزكاة',
+  'مقرر الضريبة',
+  'مقرر التكاليف',
+  'مقرر الاكسل',
+  'مقرر البرامج المحاسبية',
+  'الالتزام والانضباط',
+  'مقرر الإنجليزي',
+  ' مقرر التطبيق العملي لمحاسبة الرواتب والأجور',
+]);
 
 // Upload directly to a temporary file: no file-size-sized Buffer retained in Node's heap.
 const MAX_FILE_BYTES = 35 * 1024 * 1024;
@@ -179,18 +204,30 @@ function receiveExcel(req, res, next) {
     next();
   });
 }
-function excelValue(cell) {
+function excelValue(cell, preserveText = false) {
   const value = cell.value;
   if (value === null || value === undefined) return null;
   if (value instanceof Date) return value.toISOString();
   if (typeof value === 'object') {
-    if (value.result !== undefined) return value.result;
-    if (value.text !== undefined) return value.text;
+    if (value.result !== undefined) return value.result === null ? null : String(value.result);
+    if (value.text !== undefined) return String(value.text);
     if (value.richText) return value.richText.map(item => item.text).join('');
-    if (value.hyperlink) return value.text || value.hyperlink;
-    return cell.text || null;
+    if (value.hyperlink) return String(value.text || value.hyperlink);
+    return String(cell.text || '');
+  }
+  // يحافظ على الرقم نصًا عند الحفظ، ولا يسمح بتحويل أرقام الهوية والجوال إلى صيغة علمية.
+  if (preserveText) {
+    const format = cell.numFmt || '';
+    if (typeof value === 'number' && /^0+$/.test(format)) {
+      return String(value).padStart(format.length, '0');
+    }
+    return String(value);
   }
   return value;
+}
+function normalizedHeading(text) {
+  return String(text ?? '').normalize('NFKC').replace(/[\u064B-\u065F\u0670]/g, '')
+    .replace(/\s+/g, ' ').trim();
 }
 function importError(message) {
   const error = new Error(message);
@@ -207,43 +244,47 @@ async function fileHash(path) {
 async function parseWorkbookFile(path, onRecord = null) {
   const reader = new ExcelJS.stream.xlsx.WorkbookReader(path, {
     entries: 'emit', worksheets: 'emit', sharedStrings: 'cache',
-    hyperlinks: 'ignore', styles: 'ignore'
+    hyperlinks: 'ignore', styles: 'cache'
   });
   const sheets = [];
   let total = 0;
   for await (const sheet of reader) {
-    let headers = null;
+    let headerRead = false;
     let count = 0;
     for await (const row of sheet) {
-      if (row.number === 1) {
-        const lastColumn = row.cellCount;
-        if (!lastColumn) continue;
-        headers = [];
-        const used = new Set();
-        for (let i = 1; i <= lastColumn; i++) {
-          const base = String(excelValue(row.getCell(i)) ?? `عمود ${i}`).trim() || `عمود ${i}`;
-          let name = base, suffix = 2;
-          while (used.has(name)) name = `${base} (${suffix++})`;
-          used.add(name);
-          headers.push(name);
+      if (!headerRead) {
+        if (row.number !== 1) throw importError(`الورقة ${sheet.name}: عناوين الأعمدة يجب أن تكون في الصف الأول`);
+        const actualHeaders = TRAINEE_COLUMNS.map((_, i) => normalizedHeading(excelValue(row.getCell(i + 1))));
+        const mismatches = TRAINEE_COLUMNS.filter((header, i) =>
+          actualHeaders[i] !== normalizedHeading(header));
+        if (mismatches.length) {
+          throw importError(`الورقة ${sheet.name}: أسماء الأعمدة أو ترتيبها لا تطابق الأعمدة الـ21 المطلوبة. أول عمود مختلف: ${mismatches[0]}`);
         }
+        const extras = row.values.slice(TRAINEE_COLUMNS.length + 1);
+        if (extras.some(value => value !== null && value !== undefined && value !== '')) {
+          throw importError(`الورقة ${sheet.name}: توجد أعمدة إضافية بعد العمود 21`);
+        }
+        headerRead = true;
         continue;
       }
-      if (!headers) continue;
       const payload = {};
       let nonempty = false;
-      for (let i = 1; i <= headers.length; i++) {
-        const value = excelValue(row.getCell(i));
-        payload[headers[i - 1]] = value;
+      for (let i = 0; i < TRAINEE_COLUMNS.length; i++) {
+        const value = excelValue(row.getCell(i + 1), true);
+        payload[TRAINEE_COLUMNS[i]] = value;
         if (value !== null && value !== '') nonempty = true;
       }
       if (!nonempty) continue;
-      total++;
-      if (total > MAX_RECORDS) throw importError('الحد الأقصى 80000 سجل في الملف الواحد');
+      if (row.cellCount > TRAINEE_COLUMNS.length) {
+        for (let i = TRAINEE_COLUMNS.length + 1; i <= row.cellCount; i++) {
+          if (excelValue(row.getCell(i)) !== null) throw importError(`الورقة ${sheet.name}: توجد قيمة خارج الأعمدة الـ21 في الصف ${row.number}`);
+        }
+      }
+      if (++total > MAX_RECORDS) throw importError('الحد الأقصى 80000 سجل في الملف الواحد');
       count++;
       if (onRecord) await onRecord({ sheet: sheet.name, rowNumber: row.number, payload });
     }
-    if (headers) sheets.push({ name: sheet.name, count, columns: headers.length });
+    if (headerRead) sheets.push({ name: sheet.name, count, columns: TRAINEE_COLUMNS.length });
   }
   if (!sheets.length) throw importError('لم يُعثر على أوراق تحتوي على عناوين أعمدة');
   return { sheets, total };
