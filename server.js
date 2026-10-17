@@ -349,10 +349,10 @@ async function upsertRecord(client, sheet, payload, index, rowNumberEnabled) {
 }
 app.get('/api/columns', (_req,res) => res.json(TRAINEE_COLUMNS));
 
-const DASH_FIELDS = ['الجنس','المنطقة','المؤهل الدراسي','الدفعة','العام','الحالة'];
+const DASH_FIELDS = TRAINEE_COLUMNS;
 app.post('/api/dashboard', async(req,res,next)=>{
   try {
-    const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter(Number.isSafeInteger).filter(x=>x>0).slice(0,1000) : [];
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter(Number.isSafeInteger).filter(x=>x>0).slice(0,80000) : [];
     const useIds = req.body?.selectedOnly === true;
     if(useIds && !ids.length) return res.json({total:0,groups:Object.fromEntries(DASH_FIELDS.map(x=>[x,[]]))});
     const f=filters({sheet:req.body?.sheet,search:req.body?.search});
@@ -368,6 +368,60 @@ app.post('/api/dashboard', async(req,res,next)=>{
     }
     res.json({total:result.rows[0].total,groups});
   }catch(error){next(error);}
+});
+
+
+// عمليات جماعية محمية: النطاق إما معرفات محددة أو جميع النتائج المطابقة للمرشح.
+function batchScope(body) {
+  if (body?.scope === 'filtered') {
+    const f = filters({sheet:body.sheet,search:body.search});
+    return {where:f.sql,args:f.args};
+  }
+  if (body?.scope !== 'selected' || !Array.isArray(body.ids)) {
+    const e=new Error('نطاق العملية غير صالح');e.status=400;throw e;
+  }
+  const ids=[...new Set(body.ids.filter(id=>Number.isSafeInteger(id)&&id>0))].slice(0,80000);
+  if(!ids.length){const e=new Error('لم تحددي أي سجلات');e.status=400;throw e;}
+  return {where:'WHERE id = ANY($1::bigint[])',args:[ids]};
+}
+app.post('/api/selection', async(req,res,next)=>{
+  try{
+    const f=filters({sheet:req.body?.sheet,search:req.body?.search});
+    const r=await db.query(`SELECT id FROM public.trainee_records ${f.sql} ORDER BY id LIMIT 80001`,f.args);
+    if(r.rows.length>80000)return res.status(413).json({error:'تجاوز التحديد 80000 سجل'});
+    res.json({ids:r.rows.map(x=>Number(x.id))});
+  }catch(e){next(e);}
+});
+app.post('/api/records/delete-bulk',adminOnly,async(req,res,next)=>{
+  let client;
+  try{
+    const {where,args}=batchScope(req.body);
+    if(req.body.scope==='filtered' && !req.body.confirmAll) return res.status(400).json({error:'تأكيد حذف جميع النتائج مطلوب'});
+    client=await db.connect();await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(84621831)');
+    const result=await client.query(`DELETE FROM public.trainee_records ${where}`,args);
+    await client.query('COMMIT');res.json({deleted:result.rowCount});
+  }catch(e){if(client)await client.query('ROLLBACK').catch(()=>{});next(e);}finally{client?.release();}
+});
+app.post('/api/export-bulk',async(req,res,next)=>{
+  if(!['admin','exporter'].includes(req.role))return res.sendStatus(403);
+  try{
+    const {where,args}=batchScope(req.body);
+    res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition','attachment; filename="trainees.xlsx"');
+    res.setHeader('Cache-Control','no-store');
+    const wb=new ExcelJS.stream.xlsx.WorkbookWriter({stream:res,useStyles:false,useSharedStrings:false});
+    const ws=wb.addWorksheet('البيانات',{views:[{rightToLeft:true}]});
+    ws.addRow(TRAINEE_COLUMNS).commit();
+    let lastId=0;
+    while(true){
+      const r=await db.query(`SELECT id,payload FROM public.trainee_records ${where ? where+' AND':'WHERE'} id>$${args.length+1} ORDER BY id LIMIT 300`,[...args,lastId]);
+      if(!r.rows.length)break;
+      for(const row of r.rows)ws.addRow(TRAINEE_COLUMNS.map(k=>safeExcelValue(row.payload?.[k]))).commit();
+      lastId=Number(r.rows.at(-1).id);
+    }
+    ws.commit();await wb.commit();
+  }catch(e){if(res.headersSent){res.destroy(e);}else next(e);}
 });
 
 app.post('/api/records', adminOnly, async (req,res,next) => {
