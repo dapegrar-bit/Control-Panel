@@ -268,59 +268,75 @@ $('docResetPosition').onclick=()=>{const t=DOCUMENT_TEMPLATES.find(x=>x.id===$('
 function safePdfFileName(name){
  return String(name||'متدرب').trim().replace(/[\\/:*?"<>|\u0000-\u001F]/g,'-').replace(/\s+/g,' ').slice(0,130)||'متدرب';
 }
-function openDocPrintWindow(t,name,w){
- if(!w)throw Error('تعذر فتح نافذة الطباعة');
- const imageUrl=docAssetUrl(t.image);
- const fontUrl=docAssetUrl('assets/fonts/din-next-lt-arabic.woff2');
- const n=t.name||{};
- const cleanName=safePdfFileName(name);
- const doc=w.document;
- // إنشاء عناصر آمنة: لا نضع اسم المتدرب داخل HTML.
- doc.open();
- doc.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>مستند</title><style id="printSize"></style><style>
- @font-face{font-family:DINDoc;src:url('${fontUrl}') format('woff2');font-display:swap}
- html,body{margin:0;padding:0;background:#fff}
- .paper{position:relative;overflow:hidden;margin:0 auto;page-break-inside:avoid;break-inside:avoid}
- .bg{display:block;position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
- .name{position:absolute;transform:translate(-50%,-50%);font-family:DINDoc,'DIN Next LT Arabic',Tahoma,sans-serif;font-weight:600;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
- @media print{html,body{width:100%;height:100%}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
- </style></head><body><div class="paper"><img id="bg" class="bg" alt=""><div class="name" id="traineeName"></div></div></body></html>`);
- doc.close();
- doc.title=cleanName;
- const bg=doc.getElementById('bg'), label=doc.getElementById('traineeName');
- label.textContent=String(name||'');
- bg.onload=async()=>{
-  const iw=bg.naturalWidth,ih=bg.naturalHeight;
-  if(!iw||!ih)return;
-  // المقاس الفيزيائي للصورة وفق 96 CSS px/in؛ لا نكبرها أبدًا.
-  // يُصغَّر القالب عند تجاوز حدود A4 فقط، دون تغيير نسبته.
-  const landscape=iw>=ih;
-  const limitW=landscape?297:210,limitH=landscape?210:297;
-  const originalW=iw*25.4/96,originalH=ih*25.4/96;
-  const scale=Math.min(1,limitW/originalW,limitH/originalH);
-  const widthMm=originalW*scale,heightMm=originalH*scale;
-  doc.getElementById('printSize').textContent=
-   `@page{size:${widthMm.toFixed(3)}mm ${heightMm.toFixed(3)}mm;margin:0}`+
-   `.paper{width:${widthMm.toFixed(3)}mm;height:${heightMm.toFixed(3)}mm}`+
-   `.name{left:${Number(n.x??50)}%;top:${Number(n.y??50)}%;`+
-   `color:${/^#[0-9a-f]{6}$/i.test(n.color)?n.color:'#1F4E46'};`+
-   `font-size:${Math.max(8,Number(n.size)||32)*scale}pt;`+
-   `max-width:${Number(n.width??74)}%}`;
-  try{await doc.fonts.ready}catch{}
-  w.focus();w.print();
- };
- bg.onerror=()=>{doc.body.textContent='تعذر تحميل صورة القالب؛ تحققي من وجودها في مجلد templates.'};
- bg.src=imageUrl;
- return w;
+let docPdfLoader;
+function ensurePdfLibrary(){
+ if(window.jspdf?.jsPDF)return Promise.resolve(window.jspdf.jsPDF);
+ if(docPdfLoader)return docPdfLoader;
+ docPdfLoader=new Promise((resolve,reject)=>{
+  const script=document.createElement('script');
+  script.src='https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js';
+  script.onload=()=>window.jspdf?.jsPDF?resolve(window.jspdf.jsPDF):reject(Error('تعذر تحميل مكتبة PDF'));
+  script.onerror=()=>reject(Error('تعذر تحميل مكتبة PDF. تحققي من الاتصال بالإنترنت.'));
+  document.head.append(script);
+ });
+ return docPdfLoader;
 }
-async function issueDocument(){const raw=DOCUMENT_TEMPLATES.find(x=>x.id===$('docTemplate').value);if(!docPerson||!raw)return;const t=docEffective(raw);
- // فتح النافذة ضمن نقرة المستخدم مباشرة لتجنب حظر النوافذ المنبثقة.
- let w;try{w=window.open('','_blank');if(!w)throw Error('اسمحي بالنوافذ المنبثقة')}catch(e){$('docIssueStatus').textContent=e.message;return}
- $('docIssue').disabled=true;$('docIssueStatus').textContent='جارٍ تسجيل الإصدار...';
- try{const r=await json('/documents/issue',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({recordId:docPerson.id,templateId:t.id})});
- // أعِد استخدام النافذة التي فتحها المتصفح بالفعل.
- openDocPrintWindow(t,r.trainee.name,w);$('docIssueStatus').textContent=`تم تجهيز المستند رقم ${r.issueId} للطباعة. إجمالي الإصدارات المسجلة للمتدرب: ${r.totalIssues}`;await loadDocHistory(docPerson.id)
- }catch(e){w.close();$('docIssueStatus').textContent=e.message}finally{$('docIssue').disabled=false}
+async function downloadDocPdf(t,name){
+ const JsPDF=await ensurePdfLibrary();
+ const image=new Image();
+ image.crossOrigin='anonymous';
+ image.src=docAssetUrl(t.image);
+ await new Promise((resolve,reject)=>{
+  if(image.complete&&image.naturalWidth)return resolve();
+  image.onload=resolve;image.onerror=()=>reject(Error('تعذر قراءة صورة القالب'));
+ });
+ const iw=image.naturalWidth,ih=image.naturalHeight;
+ if(!iw||!ih)throw Error('أبعاد صورة القالب غير معروفة');
+ const canvas=document.createElement('canvas');
+ canvas.width=iw;canvas.height=ih;
+ const ctx=canvas.getContext('2d');
+ ctx.drawImage(image,0,0,iw,ih);
+ const preview=$('docPreview');
+ const previewWidth=preview.getBoundingClientRect().width||iw;
+ const previewName=preview.querySelector('.preview-name');
+ const scale=iw/previewWidth;
+ const n=t.name||{};
+ const fontSize=previewName?parseFloat(getComputedStyle(previewName).fontSize)*scale:(Number(n.size)||32);
+ const family=previewName?getComputedStyle(previewName).fontFamily:"Tahoma, Arial, sans-serif";
+ try{await document.fonts.ready}catch{}
+ ctx.textAlign='center';ctx.textBaseline='middle';ctx.direction='rtl';
+ ctx.fillStyle=/^#[0-9a-f]{6}$/i.test(n.color)?n.color:'#1F4E46';
+ ctx.font=`600 ${Math.max(10,fontSize)}px ${family}`;
+ const text=String(name||'').trim();
+ const maxWidth=iw*(Number(n.width??74)/100);
+ ctx.fillText(text,iw*Number(n.x??50)/100,ih*Number(n.y??50)/100,maxWidth);
+ // لا نكبر الصورة؛ نصغّرها فقط إذا تجاوزت حدود A4.
+ const limitW=iw>=ih?297:210,limitH=iw>=ih?210:297;
+ const naturalW=iw*25.4/96,naturalH=ih*25.4/96;
+ const factor=Math.min(1,limitW/naturalW,limitH/naturalH);
+ const pageW=naturalW*factor,pageH=naturalH*factor;
+ const pdf=new JsPDF({orientation:pageW>=pageH?'landscape':'portrait',unit:'mm',
+   format:[pageW,pageH],compress:true,hotfixes:['px_scaling']});
+ pdf.addImage(canvas.toDataURL('image/png'),'PNG',0,0,pageW,pageH,undefined,'FAST');
+ pdf.save(safePdfFileName(name)+'.pdf');
+}
+
+async function issueDocument(){
+ const raw=DOCUMENT_TEMPLATES.find(x=>x.id===$('docTemplate').value);
+ if(!docPerson||!raw)return;
+ const t=docEffective(raw);
+ const name=String(docPerson.payload?.[docNameKey]||'').trim();
+ if(!name){$('docIssueStatus').textContent='لم يُعثر على اسم المتدرب';return}
+ $('docIssue').disabled=true;$('docIssueStatus').textContent='جارٍ إنشاء PDF باسم المتدرب...';
+ try{
+  // توليد الملف أولًا؛ لا نُسجّل إصدارًا إذا فشل تحميل الصورة أو المكتبة.
+  await downloadDocPdf(t,name);
+  const r=await json('/documents/issue',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({recordId:docPerson.id,templateId:t.id})});
+  $('docIssueStatus').textContent=`تم تنزيل ${safePdfFileName(name)}.pdf وتسجيل الإصدار رقم ${r.issueId}.`;
+  await loadDocHistory(docPerson.id);
+ }catch(e){$('docIssueStatus').textContent=e.message}
+ finally{$('docIssue').disabled=false}
 }
 $('docSearchBtn').onclick=searchDocuments;$('docSearch').onkeydown=e=>{if(e.key==='Enter')searchDocuments()};$('docTemplate').onchange=renderDocPreview;$('docIssue').onclick=issueDocument;
 
