@@ -492,6 +492,52 @@ app.post('/api/import/upload', adminOnly, receiveExcel, async (req, res, next) =
   finally{client?.release();await cleanTemp(req.file);}
 });
 
+// Import only genuinely new trainees; existing national IDs are never overwritten.
+app.post('/api/import/new-only', adminOnly, receiveExcel, async (req, res, next) => {
+  let client;
+  try {
+    if (!req.file) throw importError('اختاري ملف Excel');
+    client = await db.connect();
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(84621831)');
+    const index = await identityIndex(client);
+    const rowNumberEnabled = await hasRowNumberColumn(client);
+    let added = 0, skipped = 0;
+    const seenNoId = new Set();
+    const parsed = await parseWorkbookFile(req.file.path, async record => {
+      const id = identity(record.payload);
+      if (id) {
+        if (index.has(id)) {
+          if (index.get(id) === null) throw importError(`الهوية ${id} مكررة في قاعدة البيانات وتحتاج مراجعة`);
+          skipped++;
+          return;
+        }
+      } else {
+        // Do not merge distinct people based on name or phone; skip only exact duplicates.
+        const signature = JSON.stringify([record.sheet, record.payload]);
+        if (seenNoId.has(signature)) { skipped++; return; }
+        seenNoId.add(signature);
+        const same = await client.query(
+          'SELECT 1 FROM public.trainee_records WHERE sheet_name=$1 AND payload=$2::jsonb LIMIT 1',
+          [record.sheet, JSON.stringify(record.payload)]
+        );
+        if (same.rowCount) { skipped++; return; }
+      }
+      const result = await insertOne(client, record.sheet, record.payload, rowNumberEnabled);
+      if (id) index.set(id, result.rows[0].id);
+      added++;
+    });
+    await client.query('COMMIT');
+    res.json({ imported: parsed.total, added, skipped, sheets: parsed.sheets });
+  } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    next(error);
+  } finally {
+    client?.release();
+    await cleanTemp(req.file);
+  }
+});
+
 app.use((error, req, res, _next) => {
   if (res.headersSent) return;
   if (error instanceof multer.MulterError) {
